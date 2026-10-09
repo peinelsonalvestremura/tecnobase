@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111a29">
+  <meta name="description" content="TECNOBASE — Gestão de Tecnologia Escolar">
+  <title>TECNOBASE — Gestão de Tecnologia Escolar</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase.js"></script>
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <div id="toast-region" class="toast-region" aria-live="polite"></div>
+  <main id="login-screen" class="login-screen">
+    <section class="login-brand"><img class="brand-logo login-logo" src="assets/tecnobase-logo.jpeg" alt="Logo TECNOBASE"><div class="eyebrow">GESTÃO DE TECNOLOGIA ESCOLAR</div><h1>Mais controle.<br><span>Mais educação.</span></h1><p>Equipamentos, pessoas e espaços organizados em um só lugar.</p><div class="login-art" aria-hidden="true"><div class="art-orbit orbit-a"></div><div class="art-orbit orbit-b"></div><div class="art-device">▣</div><div class="art-dot dot-a"></div><div class="art-dot dot-b"></div></div><small>TECNOBASE · CONTROLE E GESTÃO</small></section>
+    <section class="login-panel"><div class="login-form-wrap"><div class="mobile-brand"><img class="brand-logo mobile-logo" src="assets/tecnobase-logo.jpeg" alt=""><b>TECNOBASE</b></div><div class="eyebrow">BEM-VINDO DE VOLTA</div><h2>Acesse sua conta</h2><p class="muted">Entre com seu e-mail e senha para continuar.</p>
+      <form id="login-form"><label for="login-email">E-mail</label><div class="input-wrap"><span class="input-icon">✉</span><input id="login-email" type="email" autocomplete="username" placeholder="nome@escola.com.br" required></div><div class="label-row"><label for="login-password">Senha</label><button class="text-button" id="forgot-password" type="button">Esqueceu?</button></div><div class="input-wrap"><span class="input-icon">⌑</span><input id="login-password" type="password" autocomplete="current-password" placeholder="Sua senha" required><button class="reveal-button" type="button" data-toggle-password="login-password" aria-label="Mostrar senha">◉</button></div><label class="check-row"><input type="checkbox" id="remember-me" checked><span>Lembrar meu e-mail</span></label><button class="button primary full" type="submit"><span>Entrar no sistema</span><span>→</span></button><p class="login-note">Acesso protegido pela autenticação do Supabase.</p></form></div><div class="login-foot">© <span id="year"></span> TECNOBASE <span>·</span> Gestão escolar inteligente</div></section>
+  </main>
+  <div id="app-shell" class="app-shell hidden">
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-brand"><img class="brand-logo sidebar-logo" src="assets/tecnobase-logo.jpeg" alt=""><div><b>TECNOBASE</b><small>GESTÃO ESCOLAR</small></div><button id="close-sidebar" class="icon-button mobile-only" aria-label="Fechar menu">×</button></div>
+      <nav class="side-nav" aria-label="Navegação principal">
+        <div class="nav-caption">PRINCIPAL</div><button class="nav-item active" data-page="dashboard"><span>◫</span>Dashboard</button>
+        <div class="nav-caption">GESTÃO</div><button class="nav-item" data-page="equipamentos"><span>▣</span>Equipamentos</button><button class="nav-item" data-page="salas"><span>⌗</span>Salas</button><button class="nav-item" data-page="alunos"><span>♙</span>Alunos</button><button class="nav-item" data-page="emprestimos"><span>⇄</span>Empréstimos</button><button class="nav-item" data-page="manutencoes"><span>⌁</span>Manutenções</button>
+        <div class="nav-caption">CONTROLE</div><button class="nav-item" data-page="relatorios"><span>▤</span>Relatórios</button>
+        <div class="nav-caption">ADMINISTRAÇÃO</div><button class="nav-item" data-page="usuarios"><span>♧</span>Usuários</button><button class="nav-item" data-page="configuracoes"><span>⚙</span>Configurações</button>
+      </nav>
+      <div class="sidebar-bottom"><div class="help-card"><span class="help-icon">?</span><b>Precisa de ajuda?</b><small>Consulte o administrador do sistema.</small></div><div class="user-card"><div id="user-avatar" class="avatar">•</div><div class="user-meta"><b id="user-name">Usuário</b><small id="user-role">Perfil</small></div><button id="logout-button" class="logout-button" title="Sair">↪</button></div></div>
+    </aside>
+    <div id="sidebar-scrim" class="sidebar-scrim"></div>
+    <section class="main-column"><header class="topbar"><button id="menu-toggle" class="icon-button menu-toggle" aria-label="Abrir menu">☰</button><div class="breadcrumbs"><span>TECNOBASE</span><span>/</span><b id="breadcrumb-current">Dashboard</b></div><div class="topbar-actions"><div class="update-indicator" id="last-update">Última atualização · —</div><div class="top-date"><span>◷</span><span id="today-label"></span></div><button id="refresh-button" class="icon-button" title="Atualizar dados">↻</button><div class="top-avatar" id="top-avatar">•</div></div></header><main id="page-content" class="page-content"></main></section>
+  </div>
+  <dialog id="record-dialog" class="record-dialog"><form id="record-form" method="dialog"><div class="dialog-head"><div><span class="eyebrow" id="dialog-eyebrow">CADASTRO</span><h2 id="dialog-title">Novo registro</h2></div><button type="button" class="icon-button" data-close-dialog aria-label="Fechar">×</button></div><section id="equipment-preview" class="equipment-preview" hidden><div class="equipment-preview-image"><img id="equipment-preview-photo" src="assets/equipment-tablet.png" alt="Prévia do equipamento"></div><div class="equipment-preview-copy"><span class="eyebrow">PRÉVIA DO EQUIPAMENTO</span><h3 id="equipment-preview-title">Tablet Positivo T2040B</h3><p>A imagem acompanha o tipo selecionado para ajudar a identificar o equipamento durante o cadastro.</p><span class="preview-chip" id="equipment-preview-type">Tablet</span></div></section><div id="dialog-fields" class="dialog-fields"></div><div class="dialog-actions"><button type="button" class="button secondary" data-close-dialog>Cancelar</button><button type="submit" class="button primary">Salvar registro</button></div></form></dialog>
+  <dialog id="detail-dialog" class="record-dialog detail-dialog"><div id="detail-content"></div></dialog>
+  <dialog id="delete-confirm-dialog" class="delete-confirm-dialog" aria-labelledby="delete-confirm-title"><form method="dialog"><div class="delete-confirm-icon" aria-hidden="true">🗑</div><span class="eyebrow">CONFIRMAÇÃO</span><h2 id="delete-confirm-title">Tem certeza que deseja excluir?</h2><p id="delete-confirm-message">Esse registro será removido do sistema. Essa ação não pode ser desfeita.</p><div class="delete-confirm-actions"><button class="button secondary" value="cancel">Cancelar</button><button class="button danger-confirm" value="delete">Excluir</button></div></form></dialog>
+</body>
+</html>
