@@ -2,7 +2,7 @@
   const db = window.supabaseClient;
   const $ = (s, root = document) => root.querySelector(s);
   const $$ = (s, root = document) => [...root.querySelectorAll(s)];
-  const state = { user: null, profile: null, role: "visualizacao", page: "dashboard", rows: {}, userDirectory: [], filters: { q: "", status: "" }, busy: false, realtimeChannel: null, realtimeRefreshTimer: null, supportMessages: [], supportRequesterId: null, supportChannel: null };
+  const state = { user: null, profile: null, role: "visualizacao", page: "dashboard", rows: {}, userDirectory: [], filters: { q: "", status: "" }, busy: false, realtimeChannel: null, realtimeRefreshTimer: null, realtimeRetryTimer: null, realtimeRetryCount: 0, realtimeChannelSequence: 0, supportMessages: [], supportRequesterId: null, supportChannel: null };
   const roleLabels = { administrador: "Administrador", usuario: "Usuário", visualizacao: "Visualização" };
   const pages = {
     dashboard: { title: "Dashboard", table: null }, equipamentos: { title: "Equipamentos", table: "equipamentos" }, salas: { title: "Salas", table: "salas" }, alunos: { title: "Alunos", table: "alunos" }, emprestimos: { title: "Empréstimos", table: "emprestimos" }, manutencoes: { title: "Manutenções", table: "manutencoes" }, relatorios: { title: "Relatórios", table: null }, usuarios: { title: "Usuários", table: "perfis" }, configuracoes: { title: "Configurações", table: null }
@@ -10,8 +10,8 @@
   const configs = {
     equipamentos: { singular: "equipamento", icon: "▣", search: ["marca", "tipo", "modelo", "nome", "patrimonio", "numero_serie"], fields: [f("tipo", "Tipo", "select", true, ["Tablet", "Notebook", "Computador / PC"]), f("marca", "Marca", "equipment-brand", true), f("modelo", "Modelo", "equipment-model", true), f("numero_serie", "Número de série", "optional-code"), f("patrimonio", "Patrimônio", "optional-code"), f("sala_id", "Sala", "ref", true, "salas"), f("status", "Status", "select", true, ["Disponível", "Emprestado", "Em manutenção", "Danificado"]), f("descricao", "Observações", "textarea")] },
     salas: { singular: "sala", icon: "⌗", search: ["nome", "tipo", "responsavel"], fields: [f("nome", "Nome da sala", "text", true), f("tipo", "Tipo de sala", "select", true, ["Laboratório", "Sala de recursos", "Sala de mídia", "Biblioteca", "Secretaria", "Outro"]), f("responsavel", "Responsável", "text"), f("descricao", "Descrição", "textarea")] },
-    alunos: { singular: "aluno", icon: "♙", search: ["nome"], fields: [f("nome", "Nome completo", "text", true)] },
-    emprestimos: { singular: "empréstimo", icon: "⇄", search: ["responsavel", "turma", "horario", "status", "observacao"], fields: [f("equipamento_id", "Equipamento", "ref", true, "equipamentos"), f("aluno_id", "Aluno · nome completo", "ref", true, "alunos"), f("responsavel", "Professor que solicitou a retirada", "text", true), f("turma", "Turma", "text", true), f("horario", "Horário da aula", "time", true), f("sala_id", "Sala de destino", "ref", true, "salas"), f("data_emprestimo", "Data do empréstimo", "date", true), f("data_prevista", "Devolução prevista", "date", true), f("status", "Status", "select", true, ["Ativo", "Devolvido", "Atrasado"]), f("observacao", "Observações", "textarea")] },
+    alunos: { singular: "aluno", icon: "♙", search: ["nome", "turma", "matricula"], fields: [f("nome", "Nome completo", "text", true), f("turma", "Turma", "text", true), f("matricula", "RA (Registro do Aluno)", "text", true)] },
+    emprestimos: { singular: "empréstimo", icon: "⇄", search: ["responsavel", "professor_solicitante", "turma", "horario", "status", "observacao"], fields: [f("equipamento_id", "Equipamento", "ref", true, "equipamentos"), f("aluno_id", "Aluno · nome completo", "ref", true, "alunos"), f("professor_solicitante", "Professor solicitante", "text", true), f("responsavel", "Responsável pelo empréstimo", "text", true), f("turma", "Turma", "text", true), f("horario", "Horário da aula", "time", true), f("sala_id", "Sala de destino", "ref", true, "salas"), f("data_emprestimo", "Data do empréstimo", "date", true), f("data_prevista", "Devolução prevista", "date", true), f("status", "Status", "select", true, ["Ativo", "Devolvido", "Atrasado"]), f("observacao", "Observações", "textarea")] },
     manutencoes: { singular: "manutenção", icon: "⌁", search: ["tipo", "problema", "descricao", "responsavel", "status"], fields: [f("equipamento_id", "Equipamento", "ref", true, "equipamentos"), f("tipo", "Tipo de manutenção", "select", true, ["Corretiva", "Preventiva"]), f("problema", "Problema identificado", "text", true), f("prioridade", "Prioridade", "select", true, ["Baixa", "Média", "Alta", "Urgente"]), f("status", "Status", "select", true, ["Aberta", "Em andamento", "Concluída"]), f("data", "Data", "date", true), f("responsavel", "Responsável", "text"), f("descricao", "Descrição", "textarea")] },
     perfis: { singular: "perfil", icon: "♧", search: ["nome", "email", "perfil"], fields: [f("id", "ID do usuário no Supabase Auth", "text", true), f("nome", "Nome completo", "text", true), f("email", "E-mail", "email", true), f("perfil", "Perfil de acesso", "select", true, ["administrador", "usuario", "visualizacao"]), f("ativo", "Acesso ativo", "select", true, ["true", "false"])] },
   };
@@ -137,27 +137,46 @@
     renderPage();
   }
   function startRealtime() {
-    if (!db || !state.user || state.realtimeChannel) return;
+    if (!db || !state.user || state.realtimeChannel || state.realtimeRetryTimer) return;
     setRealtimeStatus("connecting");
     const tables = ["equipamentos", "salas", "alunos", "emprestimos", "manutencoes"];
-    let channel = db.channel(`tecnobase-live-${state.user.id}`);
+    const channelId = ++state.realtimeChannelSequence;
+    let channel = db.channel(`tecnobase-live-${state.user.id}-${channelId}`);
     for (const table of tables) channel = channel.on("postgres_changes", { event: "*", schema: "public", table }, () => {
       clearTimeout(state.realtimeRefreshTimer);
       state.realtimeRefreshTimer = setTimeout(() => { loadData({ silent: true }); }, 250);
     });
-    state.realtimeChannel = channel.subscribe(status => {
-      if (status === "SUBSCRIBED") setRealtimeStatus("live");
+    state.realtimeChannel = channel;
+    channel.subscribe(status => {
+      if (status === "SUBSCRIBED") {
+        state.realtimeRetryCount = 0;
+        setRealtimeStatus("live");
+      }
       else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+        if (state.realtimeChannel !== channel) return;
+        state.realtimeChannel = null;
+        db.removeChannel(channel);
         setRealtimeStatus("offline");
-        if (status !== "CLOSED") toast("A atualização ao vivo não conectou. Confira se o Realtime está ativado no Supabase.", "error");
+        state.realtimeRetryCount += 1;
+        if (state.realtimeRetryCount === 3) toast("Sem conexão ao vivo. Vou continuar tentando reconectar; confira também a ativação do Realtime no Supabase.", "error");
+        const delay = Math.min(30000, 1500 * (2 ** Math.min(state.realtimeRetryCount - 1, 5)));
+        clearTimeout(state.realtimeRetryTimer);
+        state.realtimeRetryTimer = setTimeout(() => {
+          state.realtimeRetryTimer = null;
+          startRealtime();
+        }, delay);
       }
     });
   }
   function stopRealtime() {
     clearTimeout(state.realtimeRefreshTimer);
+    clearTimeout(state.realtimeRetryTimer);
     state.realtimeRefreshTimer = null;
-    if (state.realtimeChannel) db.removeChannel(state.realtimeChannel);
+    state.realtimeRetryTimer = null;
+    state.realtimeRetryCount = 0;
+    const channel = state.realtimeChannel;
     state.realtimeChannel = null;
+    if (channel) db.removeChannel(channel);
     setRealtimeStatus("offline");
   }
   function pageHeading(title, subtitle, actions = "") { return `<div class="page-heading"><div><h1>${escapeHtml(title)}</h1><p>${escapeHtml(subtitle)}</p></div><div class="heading-actions">${actions}</div></div>`; }
@@ -196,8 +215,8 @@
   function columnsFor(table) {
     if (table === "equipamentos") return [["tipo","Tipo"],["marca","Marca"],["modelo","Modelo"],["patrimonio","Patrimônio"],["numero_serie","Nº de série"],["sala_id","Sala"],["status","Status"]];
     if (table === "salas") return [["nome","Sala"],["tipo","Tipo"],["responsavel","Responsável"],["descricao","Descrição"]];
-    if (table === "alunos") return [["nome","Nome completo"]];
-    if (table === "emprestimos") return [["equipamento_id","Equipamento"],["aluno_id","Aluno"],["responsavel","Professor solicitante"],["turma","Turma"],["horario","Aula · 45 min"],["data_emprestimo","Retirada"],["data_prevista","Devolução prevista"],["status","Status"]];
+    if (table === "alunos") return [["nome","Nome completo"],["turma","Turma"],["matricula","RA"]];
+    if (table === "emprestimos") return [["equipamento_id","Equipamento"],["aluno_id","Aluno"],["professor_solicitante","Professor solicitante"],["responsavel","Responsável pelo empréstimo"],["turma","Turma"],["horario","Aula · 45 min"],["data_emprestimo","Retirada"],["data_prevista","Devolução prevista"],["status","Status"]];
     if (table === "manutencoes") return [["equipamento_id","Equipamento"],["tipo","Tipo"],["problema","Problema"],["prioridade","Prioridade"],["data","Data"],["status","Status"]];
     if (table === "perfis") return [["nome","Usuário"],["email","E-mail"],["perfil","Perfil"],["ativo","Acesso"]];
     return [["acao","Ação"],["entidade","Área"],["descricao","Descrição"],["user_id","Usuário"],["created_at","Data e hora"]];
@@ -350,11 +369,40 @@
     }
     toast("Registro excluído.","success"); await loadData();
   }
-  function exportCsv(table) {
-    const rows=state.rows[table]||[]; if(!rows.length) return toast("Não há dados para exportar.","error");
-    const headers=Object.keys(rows[0]), esc=v=>`"${String(v??"").replaceAll('"','""')}"`;
-    const csv="\ufeff"+[headers.map(esc).join(";"),...rows.map(r=>headers.map(h=>esc(r[h])).join(";"))].join("\r\n");
-    const url=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"})); const a=document.createElement("a"); a.href=url; a.download=`tecnobase-${table}-${new Date().toISOString().slice(0,10)}.csv`; a.click(); URL.revokeObjectURL(url); toast("Arquivo CSV exportado.","success");
+  async function exportCsv(table) {
+    const columns=columnsFor(table);
+    if (!columns?.length) return toast("Este relatório não está disponível.","error");
+    const button=document.querySelector(`[data-action="export"][data-table="${table}"]`);
+    if (button) { button.disabled=true; button.dataset.originalText=button.textContent; button.textContent="Preparando…"; }
+    try {
+      // Reports must include every row, not only the first 300 shown in the app.
+      const rows=[]; const pageSize=1000; let offset=0;
+      while (true) {
+        const {data,error}=await db.from(table).select("*").order("id",{ascending:true}).range(offset,offset+pageSize-1);
+        if (error) throw error;
+        rows.push(...(data||[]));
+        if (!data || data.length<pageSize) break;
+        offset+=pageSize;
+      }
+      if (!rows.length) return toast("Não há dados cadastrados para exportar neste relatório.","error");
+      const esc=value=>{
+        let text=String(value??"");
+        // Prevent spreadsheet formulas from running when a field starts with a formula marker.
+        if (/^[=+@\-\t\r]/.test(text)) text=`'${text}`;
+        return `"${text.replaceAll('"','""')}"`;
+      };
+      const csv="\ufeff"+[columns.map(([,label])=>esc(label)).join(";"),...rows.map(row=>columns.map(([key])=>esc(cellValue(table,row,key))).join(";"))].join("\r\n");
+      const url=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));
+      const a=document.createElement("a"); a.href=url; a.download=`tecnobase-${table}-${new Date().toISOString().slice(0,10)}.csv`; a.style.display="none"; document.body.append(a); a.click(); a.remove();
+      // Keep the object URL alive long enough for the browser to begin the download.
+      setTimeout(()=>URL.revokeObjectURL(url),1500);
+      toast(`Relatório baixado com ${rows.length} registro${rows.length===1?"":"s"}.`,"success");
+    } catch(error) {
+      console.error(`Falha ao exportar relatório ${table}`,error);
+      toast(`Não foi possível baixar o relatório. ${prettyError(error)}`,"error");
+    } finally {
+      if (button) { button.disabled=false; button.textContent=button.dataset.originalText||"↓ Baixar CSV"; delete button.dataset.originalText; }
+    }
   }
   function supportUserName(id) {
     if (id === state.user?.id) return state.profile?.nome || state.user?.email || "Você";
@@ -418,9 +466,26 @@
     const rememberedEmail=localStorage.getItem("tecnobase.rememberedEmail"); if(rememberedEmail)$("#login-email").value=rememberedEmail;
     if (!db) { $("#login-form").addEventListener("submit",e=>{e.preventDefault();toast("A biblioteca ou configuração do Supabase não foi carregada.","error")}); return; }
     const {data:{session}}=await db.auth.getSession(); if(session?.user) await showApp(session.user);
-    db.auth.onAuthStateChange((event,session)=>{ if(event==="SIGNED_OUT"){stopRealtime();if(state.supportChannel)db.removeChannel(state.supportChannel);state.supportChannel=null;state.user=null;$("#app-shell").classList.add("hidden");$("#login-screen").classList.remove("hidden")} else if(session?.user){state.user=session.user;setTimeout(()=>showApp(session.user),0)} });
+    db.auth.onAuthStateChange((event,session)=>{
+      if(event==="SIGNED_OUT"){
+        stopRealtime();
+        if(state.supportChannel)db.removeChannel(state.supportChannel);
+        state.supportChannel=null; state.user=null;
+        $("#app-shell").classList.add("hidden"); $("#login-screen").classList.remove("hidden");
+        return;
+      }
+      // TOKEN_REFRESHED and USER_UPDATED are normal session events. Do not
+      // reopen/reinitialize the app for them; doing so interrupts the user.
+      if(session?.user && ["INITIAL_SESSION","SIGNED_IN"].includes(event)){
+        if(state.user?.id===session.user.id && !$("#app-shell").classList.contains("hidden")) return;
+        setTimeout(()=>showApp(session.user),0);
+      }
+    });
   }
-  async function showApp(user) { state.user=user; startRealtime(); $("#login-screen").classList.add("hidden");$("#app-shell").classList.remove("hidden");$("#page-content").innerHTML=`${pageHeading("Carregando…","Buscando os dados da escola.")}<div class="metric-grid">${Array(6).fill('<div class="skeleton"></div>').join("")}</div>`; await loadData(); }
+  async function showApp(user) {
+    if(state.user?.id===user.id && !$("#app-shell").classList.contains("hidden")) return;
+    state.user=user; startRealtime(); $("#login-screen").classList.add("hidden");$("#app-shell").classList.remove("hidden");$("#page-content").innerHTML=`${pageHeading("Carregando…","Buscando os dados da escola.")}<div class="metric-grid">${Array(6).fill('<div class="skeleton"></div>').join("")}</div>`; await loadData();
+  }
   $("#login-form").addEventListener("submit",async e=>{e.preventDefault();const email=$("#login-email").value.trim();if($("#remember-me").checked)localStorage.setItem("tecnobase.rememberedEmail",email);else localStorage.removeItem("tecnobase.rememberedEmail");const b=$("button[type=submit]",e.currentTarget);b.disabled=true;const old=b.innerHTML;b.textContent="Entrando…";const {error}=await db.auth.signInWithPassword({email,password:$("#login-password").value});b.disabled=false;b.innerHTML=old;if(error)toast(loginError(error),"error")});
   $("#forgot-password").addEventListener("click",async()=>{const email=$("#login-email").value.trim();if(!email)return toast("Informe seu e-mail antes de solicitar a recuperação.","error");const {error}=await db.auth.resetPasswordForEmail(email,{redirectTo:location.href.split("#")[0]});if(error)toast(prettyError(error),"error");else toast("Se este e-mail estiver cadastrado, você receberá um link para redefinir sua senha.","success")});
   $("#logout-button").addEventListener("click",async()=>{const {error}=await db.auth.signOut();if(error)toast(prettyError(error),"error")});
