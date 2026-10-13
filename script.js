@@ -10,8 +10,8 @@
   const configs = {
     equipamentos: { singular: "equipamento", icon: "▣", search: ["marca", "tipo", "modelo", "nome", "patrimonio", "numero_serie"], fields: [f("tipo", "Tipo", "select", true, ["Tablet", "Notebook", "Computador / PC"]), f("marca", "Marca", "equipment-brand", true), f("modelo", "Modelo", "equipment-model", true), f("numero_serie", "Número de série", "optional-code"), f("patrimonio", "Patrimônio", "optional-code"), f("sala_id", "Sala", "ref", true, "salas"), f("status", "Status", "select", true, ["Disponível", "Emprestado", "Em manutenção", "Danificado"]), f("descricao", "Observações", "textarea")] },
     salas: { singular: "sala", icon: "⌗", search: ["nome", "tipo", "responsavel"], fields: [f("nome", "Nome da sala", "text", true), f("tipo", "Tipo de sala", "select", true, ["Laboratório", "Sala de recursos", "Sala de mídia", "Biblioteca", "Secretaria", "Outro"]), f("responsavel", "Responsável", "text"), f("descricao", "Descrição", "textarea")] },
-    alunos: { singular: "aluno", icon: "♙", search: ["nome", "turma", "matricula"], fields: [f("nome", "Nome completo", "text", true), f("turma", "Turma", "text", true), f("matricula", "Matrícula", "text", true)] },
-    emprestimos: { singular: "empréstimo", icon: "⇄", search: ["responsavel", "status", "observacao"], fields: [f("equipamento_id", "Equipamento", "ref", true, "equipamentos"), f("aluno_id", "Aluno", "ref", true, "alunos"), f("sala_id", "Sala", "ref", true, "salas"), f("responsavel", "Responsável pela entrega", "text", true), f("data_emprestimo", "Data do empréstimo", "date", true), f("data_prevista", "Devolução prevista", "date", true), f("status", "Status", "select", true, ["Ativo", "Devolvido", "Atrasado"]), f("observacao", "Observações", "textarea")] },
+    alunos: { singular: "aluno", icon: "♙", search: ["nome"], fields: [f("nome", "Nome completo", "text", true)] },
+    emprestimos: { singular: "empréstimo", icon: "⇄", search: ["responsavel", "turma", "horario", "status", "observacao"], fields: [f("equipamento_id", "Equipamento", "ref", true, "equipamentos"), f("aluno_id", "Aluno · nome completo", "ref", true, "alunos"), f("responsavel", "Professor que solicitou a retirada", "text", true), f("turma", "Turma", "text", true), f("horario", "Horário da aula", "time", true), f("sala_id", "Sala de destino", "ref", true, "salas"), f("data_emprestimo", "Data do empréstimo", "date", true), f("data_prevista", "Devolução prevista", "date", true), f("status", "Status", "select", true, ["Ativo", "Devolvido", "Atrasado"]), f("observacao", "Observações", "textarea")] },
     manutencoes: { singular: "manutenção", icon: "⌁", search: ["tipo", "problema", "descricao", "responsavel", "status"], fields: [f("equipamento_id", "Equipamento", "ref", true, "equipamentos"), f("tipo", "Tipo de manutenção", "select", true, ["Corretiva", "Preventiva"]), f("problema", "Problema identificado", "text", true), f("prioridade", "Prioridade", "select", true, ["Baixa", "Média", "Alta", "Urgente"]), f("status", "Status", "select", true, ["Aberta", "Em andamento", "Concluída"]), f("data", "Data", "date", true), f("responsavel", "Responsável", "text"), f("descricao", "Descrição", "textarea")] },
     perfis: { singular: "perfil", icon: "♧", search: ["nome", "email", "perfil"], fields: [f("id", "ID do usuário no Supabase Auth", "text", true), f("nome", "Nome completo", "text", true), f("email", "E-mail", "email", true), f("perfil", "Perfil de acesso", "select", true, ["administrador", "usuario", "visualizacao"]), f("ativo", "Acesso ativo", "select", true, ["true", "false"])] },
   };
@@ -196,8 +196,8 @@
   function columnsFor(table) {
     if (table === "equipamentos") return [["tipo","Tipo"],["marca","Marca"],["modelo","Modelo"],["patrimonio","Patrimônio"],["numero_serie","Nº de série"],["sala_id","Sala"],["status","Status"]];
     if (table === "salas") return [["nome","Sala"],["tipo","Tipo"],["responsavel","Responsável"],["descricao","Descrição"]];
-    if (table === "alunos") return [["nome","Aluno"],["turma","Turma"],["matricula","Matrícula"]];
-    if (table === "emprestimos") return [["equipamento_id","Equipamento"],["aluno_id","Aluno"],["responsavel","Responsável"],["data_emprestimo","Retirada"],["data_prevista","Devolução prevista"],["status","Status"]];
+    if (table === "alunos") return [["nome","Nome completo"]];
+    if (table === "emprestimos") return [["equipamento_id","Equipamento"],["aluno_id","Aluno"],["responsavel","Professor solicitante"],["turma","Turma"],["horario","Aula · 45 min"],["data_emprestimo","Retirada"],["data_prevista","Devolução prevista"],["status","Status"]];
     if (table === "manutencoes") return [["equipamento_id","Equipamento"],["tipo","Tipo"],["problema","Problema"],["prioridade","Prioridade"],["data","Data"],["status","Status"]];
     if (table === "perfis") return [["nome","Usuário"],["email","E-mail"],["perfil","Perfil"],["ativo","Acesso"]];
     return [["acao","Ação"],["entidade","Área"],["descricao","Descrição"],["user_id","Usuário"],["created_at","Data e hora"]];
@@ -207,6 +207,10 @@
     if (key === "sala_id") v = mappedName("salas", v);
     if (key === "equipamento_id") v = table === "emprestimos" ? mappedEquipmentLabel(v) : mappedName("equipamentos", v);
     if (key === "aluno_id") v = mappedName("alunos", v);
+    if (key === "horario" && v) {
+      const [hour, minute] = String(v).split(":").map(Number);
+      if (Number.isFinite(hour) && Number.isFinite(minute)) { const end = (hour * 60 + minute + 45) % (24 * 60); v = `${String(hour).padStart(2,"0")}:${String(minute).padStart(2,"0")}–${String(Math.floor(end/60)).padStart(2,"0")}:${String(end%60).padStart(2,"0")} · 45 min`; }
+    }
     if (["data_emprestimo","data_prevista","data_devolucao","data","created_at"].includes(key)) v = fmt(v, key === "created_at");
     if (key === "perfil") v = roleLabels[v] || v;
     if (key === "user_id") v = mappedUser(v);
@@ -247,6 +251,7 @@
     if (def.type === "date" && value) value = String(value).slice(0,10);
     const required = def.required ? "required" : "";
     const full = def.type === "textarea" || def.name === "observacao" ? "full-row" : "";
+    if (ownerTable === "emprestimos" && def.name === "horario") return `<div class="form-field"><label>${def.label} *</label><input type="time" name="horario" value="${escapeHtml(value)}" required><small class="field-hint">Cada aula dura 45 minutos; o horário final é calculado automaticamente.</small></div>`;
     if (ownerTable === "equipamentos" && (def.type === "equipment-brand" || def.type === "equipment-model")) {
       const options = def.type === "equipment-brand" ? Object.keys(equipmentCatalog[current.tipo] || {}) : (equipmentCatalog[current.tipo]?.[current.marca] || []);
       return `<div class="form-field"><label>${def.label}${def.required?" *":""}</label><select name="${def.name}" ${required}><option value="">${def.type === "equipment-brand" ? "Selecione o tipo primeiro" : "Selecione a marca primeiro"}</option>${options.map(v=>`<option value="${escapeHtml(v)}" ${value===v?"selected":""}>${escapeHtml(v)}</option>`).join("")}</select></div>`;
