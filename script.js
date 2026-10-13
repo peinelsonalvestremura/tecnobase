@@ -132,7 +132,20 @@
     }
     const name = profile?.nome || state.user.email?.split("@")[0] || "Usuário";
     $("#user-name").textContent = name; $("#user-role").textContent = roleLabels[state.role] || "Visualização";
-    $("#user-avatar").textContent = name.trim().charAt(0).toUpperCase(); $("#top-avatar").textContent = name.trim().charAt(0).toUpperCase();
+    const userAvatar = $("#user-avatar"), normalizedName = name.trim().toLocaleLowerCase("pt-BR");
+    const normalizedEmail = (state.user.email || "").trim().toLocaleLowerCase("pt-BR");
+    const isThales = normalizedName.includes("thales") || normalizedEmail === "thalesmenezes937@gmail.com";
+    const isDaniela = normalizedName.includes("daniela") || normalizedEmail.includes("daniela");
+    if (isThales || isDaniela) {
+      const photo = isDaniela ? "assets/daniela-profile.jpeg" : "assets/thales-profile.jpeg";
+      const alt = isDaniela ? "Foto de Daniela Moreira" : "Foto de Thales Menezes";
+      userAvatar.classList.add("has-profile-photo");
+      userAvatar.innerHTML = `<img src="${photo}" alt="${alt}">`;
+    } else {
+      userAvatar.classList.remove("has-profile-photo");
+      userAvatar.textContent = name.trim().charAt(0).toUpperCase();
+    }
+    $("#top-avatar").textContent = name.trim().charAt(0).toUpperCase();
     renderUpdateIndicator();
     renderPage();
   }
@@ -420,9 +433,14 @@
     else if (!participants.includes(state.supportRequesterId)) state.supportRequesterId = participants[0] || null;
     conversations.hidden = !isAdmin;
     conversations.innerHTML = isAdmin ? (participants.length ? participants.map(id => `<button type="button" class="support-contact ${id===state.supportRequesterId?"active":""}" data-support-requester="${escapeHtml(id)}"><span class="support-contact-avatar">${escapeHtml(supportUserName(id).trim().charAt(0).toUpperCase())}</span><span><b>${escapeHtml(supportUserName(id))}</b><small>Conversa de suporte</small></span></button>`).join("") : `<div class="support-empty-contact">As conversas aparecerão aqui quando alguém pedir ajuda.</div>`) : "";
+    const supportForm = $("#support-form"), hasSelectedConversation = !isAdmin || (state.supportRequesterId && participants.includes(state.supportRequesterId));
+    supportForm.hidden = isAdmin && !hasSelectedConversation;
+    $("#support-message").placeholder = isAdmin ? "Escreva sua resposta…" : "Escreva sua mensagem…";
     const rows = state.supportMessages.filter(row => row.solicitante_id === state.supportRequesterId);
     if (!rows.length) {
-      list.innerHTML = `<div class="support-welcome"><span>✦</span><b>Como podemos ajudar?</b><p>Conte o que aconteceu. Sua mensagem será enviada ao administrador do TECNOBASE.</p></div>`;
+      list.innerHTML = isAdmin
+        ? `<div class="support-welcome"><span>✦</span><b>Nenhuma solicitação selecionada</b><p>Quando alguém enviar uma mensagem de suporte, ela aparecerá nesta caixa para o administrador Thales Menezes responder.</p></div>`
+        : `<div class="support-welcome"><span>✦</span><b>Como podemos ajudar?</b><p>Conte o que aconteceu. Sua mensagem será enviada ao administrador Thales Menezes.</p></div>`;
       return;
     }
     list.innerHTML = rows.map(row => `<article class="support-message ${row.remetente_id===state.user?.id?"outgoing":"incoming"}"><small>${escapeHtml(supportUserName(row.remetente_id))} · ${fmt(row.created_at,true,true)}</small><p>${escapeHtml(row.mensagem)}</p></article>`).join("");
@@ -439,6 +457,9 @@
     renderSupportMessages();
   }
   async function openSupportChat() {
+    const isAdmin = state.role === "administrador";
+    $("#support-title").textContent = isAdmin ? "Caixa de entrada do suporte" : "Conversa com o administrador";
+    $("#support-subtitle").textContent = isAdmin ? "Responda às solicitações recebidas." : "Descreva o problema para receber ajuda.";
     $("#support-dialog").showModal();
     await refreshSupportChat();
     if (!state.supportChannel) {
@@ -452,6 +473,7 @@
     if (!message || !state.user) return;
     const requesterId = state.role === "administrador" ? state.supportRequesterId : state.user.id;
     if (!requesterId) return toast("Selecione uma conversa para responder.","error");
+    if (state.role === "administrador" && !state.supportMessages.some(row => row.solicitante_id === requesterId)) return toast("O administrador pode responder apenas a solicitações recebidas.","error");
     const submit = $("button[type='submit']", event.currentTarget); submit.disabled = true;
     const {error} = await db.from("suporte_mensagens").insert({solicitante_id:requesterId,remetente_id:state.user.id,mensagem:message});
     submit.disabled = false;
