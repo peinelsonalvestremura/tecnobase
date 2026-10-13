@@ -2,14 +2,14 @@
   const db = window.supabaseClient;
   const $ = (s, root = document) => root.querySelector(s);
   const $$ = (s, root = document) => [...root.querySelectorAll(s)];
-  const state = { user: null, profile: null, role: "visualizacao", page: "dashboard", rows: {}, userDirectory: [], filters: { q: "", status: "" }, busy: false, realtimeChannel: null, realtimeRefreshTimer: null };
+  const state = { user: null, profile: null, role: "visualizacao", page: "dashboard", rows: {}, userDirectory: [], filters: { q: "", status: "" }, busy: false, realtimeChannel: null, realtimeRefreshTimer: null, supportMessages: [], supportRequesterId: null, supportChannel: null };
   const roleLabels = { administrador: "Administrador", usuario: "Usuário", visualizacao: "Visualização" };
   const pages = {
     dashboard: { title: "Dashboard", table: null }, equipamentos: { title: "Equipamentos", table: "equipamentos" }, salas: { title: "Salas", table: "salas" }, alunos: { title: "Alunos", table: "alunos" }, emprestimos: { title: "Empréstimos", table: "emprestimos" }, manutencoes: { title: "Manutenções", table: "manutencoes" }, relatorios: { title: "Relatórios", table: null }, usuarios: { title: "Usuários", table: "perfis" }, configuracoes: { title: "Configurações", table: null }
   };
   const configs = {
     equipamentos: { singular: "equipamento", icon: "▣", search: ["marca", "tipo", "modelo", "nome", "patrimonio", "numero_serie"], fields: [f("tipo", "Tipo", "select", true, ["Tablet", "Notebook", "Computador / PC"]), f("marca", "Marca", "equipment-brand", true), f("modelo", "Modelo", "equipment-model", true), f("numero_serie", "Número de série", "optional-code"), f("patrimonio", "Patrimônio", "optional-code"), f("sala_id", "Sala", "ref", true, "salas"), f("status", "Status", "select", true, ["Disponível", "Emprestado", "Em manutenção", "Danificado"]), f("descricao", "Observações", "textarea")] },
-    salas: { singular: "sala", icon: "⌗", search: ["nome", "tipo", "responsavel"], fields: [f("nome", "Nome da sala", "text", true), f("tipo", "Tipo de sala", "select", true, ["Sala de aula", "Laboratório", "Biblioteca", "Secretaria", "Outro"]), f("responsavel", "Responsável", "text"), f("descricao", "Descrição", "textarea")] },
+    salas: { singular: "sala", icon: "⌗", search: ["nome", "tipo", "responsavel"], fields: [f("nome", "Nome da sala", "text", true), f("tipo", "Tipo de sala", "select", true, ["Laboratório", "Sala de recursos", "Sala de mídia", "Biblioteca", "Secretaria", "Outro"]), f("responsavel", "Responsável", "text"), f("descricao", "Descrição", "textarea")] },
     alunos: { singular: "aluno", icon: "♙", search: ["nome", "turma", "matricula"], fields: [f("nome", "Nome completo", "text", true), f("turma", "Turma", "text", true), f("matricula", "Matrícula", "text", true)] },
     emprestimos: { singular: "empréstimo", icon: "⇄", search: ["responsavel", "status", "observacao"], fields: [f("equipamento_id", "Equipamento", "ref", true, "equipamentos"), f("aluno_id", "Aluno", "ref", true, "alunos"), f("sala_id", "Sala", "ref", true, "salas"), f("responsavel", "Responsável pela entrega", "text", true), f("data_emprestimo", "Data do empréstimo", "date", true), f("data_prevista", "Devolução prevista", "date", true), f("status", "Status", "select", true, ["Ativo", "Devolvido", "Atrasado"]), f("observacao", "Observações", "textarea")] },
     manutencoes: { singular: "manutenção", icon: "⌁", search: ["tipo", "problema", "descricao", "responsavel", "status"], fields: [f("equipamento_id", "Equipamento", "ref", true, "equipamentos"), f("tipo", "Tipo de manutenção", "select", true, ["Corretiva", "Preventiva"]), f("problema", "Problema identificado", "text", true), f("prioridade", "Prioridade", "select", true, ["Baixa", "Média", "Alta", "Urgente"]), f("status", "Status", "select", true, ["Aberta", "Em andamento", "Concluída"]), f("data", "Data", "date", true), f("responsavel", "Responsável", "text"), f("descricao", "Descrição", "textarea")] },
@@ -47,7 +47,7 @@
     model.innerHTML = `<option value="">Selecione</option>${models.map(v=>`<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join("")}`;
     model.value = !resetModel && models.includes(previousModel) ? previousModel : (resetModel ? "" : (models[0] || ""));
   }
-  const fmt = (value, time = false) => { if (!value) return "—"; const d = new Date(value); return Number.isNaN(+d) ? value : new Intl.DateTimeFormat("pt-BR", time ? { dateStyle: "short", timeStyle: "short" } : { dateStyle: "short" }).format(d); };
+  const fmt = (value, time = false, fullYear = false) => { if (!value) return "—"; const d = new Date(value); return Number.isNaN(+d) ? value : new Intl.DateTimeFormat("pt-BR", time ? { dateStyle: fullYear ? "medium" : "short", timeStyle: "short" } : { dateStyle: "short" }).format(d); };
   const escapeHtml = (v) => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   function toast(message, kind = "") { const el = document.createElement("div"); el.className = `toast ${kind}`; el.textContent = message; $("#toast-region").append(el); setTimeout(() => el.remove(), 4100); }
   function prettyError(error) { const msg = error?.message || "Não foi possível concluir esta ação."; if (/row-level security|permission denied|not authorized/i.test(msg)) return "Seu perfil não tem permissão para esta ação."; if (/relation .* does not exist|could not find the table/i.test(msg)) return "As tabelas ainda não foram criadas. Execute o arquivo schema.sql no Supabase."; if (/invalid api key|jwt/i.test(msg)) return "A configuração pública do Supabase precisa ser conferida."; return msg; }
@@ -82,8 +82,19 @@
   }
   function renderUpdateIndicator() {
     const latest = latestUpdate(), el = $("#last-update"); if (!el) return;
-    el.innerHTML = latest ? `Última atualização · <b>${escapeHtml(mappedUser(latest.userId))}</b><small>${fmt(latest.date, true)}</small>` : "Última atualização · —";
-    el.title = latest ? `${mappedUser(latest.userId)} atualizou ${titleCase(latest.table)} em ${fmt(latest.date, true)}` : "Ainda não há registros atualizados.";
+    el.innerHTML = latest ? `Última atualização por <b>${escapeHtml(mappedUser(latest.userId))}</b><small>${fmt(latest.date, true, true)}</small>` : "Última atualização por —";
+    el.title = latest ? `${mappedUser(latest.userId)} atualizou ${titleCase(latest.table)} em ${fmt(latest.date, true, true)}` : "Ainda não há registros atualizados.";
+  }
+  function setRealtimeStatus(status) {
+    const el = $("#realtime-status"); if (!el) return;
+    const states = {
+      connecting: ["connecting", "Conectando"],
+      live: ["live", "Ao vivo"],
+      offline: ["offline", "Sem conexão ao vivo"]
+    };
+    const [className, label] = states[status] || states.connecting;
+    el.className = `realtime-indicator ${className}`;
+    el.textContent = label;
   }
   async function loadData({ silent = false } = {}) {
     if (!db || !state.user) return;
@@ -127,6 +138,7 @@
   }
   function startRealtime() {
     if (!db || !state.user || state.realtimeChannel) return;
+    setRealtimeStatus("connecting");
     const tables = ["equipamentos", "salas", "alunos", "emprestimos", "manutencoes"];
     let channel = db.channel(`tecnobase-live-${state.user.id}`);
     for (const table of tables) channel = channel.on("postgres_changes", { event: "*", schema: "public", table }, () => {
@@ -134,7 +146,11 @@
       state.realtimeRefreshTimer = setTimeout(() => { loadData({ silent: true }); }, 250);
     });
     state.realtimeChannel = channel.subscribe(status => {
-      if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") toast("A atualização automática precisa ser ativada no Supabase. Execute o arquivo ativar-atualizacao-em-tempo-real.sql.", "error");
+      if (status === "SUBSCRIBED") setRealtimeStatus("live");
+      else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+        setRealtimeStatus("offline");
+        if (status !== "CLOSED") toast("A atualização ao vivo não conectou. Confira se o Realtime está ativado no Supabase.", "error");
+      }
     });
   }
   function stopRealtime() {
@@ -142,6 +158,7 @@
     state.realtimeRefreshTimer = null;
     if (state.realtimeChannel) db.removeChannel(state.realtimeChannel);
     state.realtimeChannel = null;
+    setRealtimeStatus("offline");
   }
   function pageHeading(title, subtitle, actions = "") { return `<div class="page-heading"><div><h1>${escapeHtml(title)}</h1><p>${escapeHtml(subtitle)}</p></div><div class="heading-actions">${actions}</div></div>`; }
   function metric(label, value, icon, color, note = "") { const tones={"#3187e8":"#6384a0","#14b878":"#62917c","#12b6d8":"#6a9aa1","#efa817":"#b18b55","#e45656":"#aa7070","#635be4":"#7d79a0"}; color=tones[color]||color; return `<article class="metric-card" style="--tone:${color};--tint:${color}16"><div class="metric-top">${label}<span class="metric-icon">${icon}</span></div><div class="metric-value">${value}</div><div class="metric-note">${note}</div></article>`; }
@@ -151,16 +168,29 @@
   }
   function renderDashboard() {
     const s = getStats(), eq = state.rows.equipamentos || [];
-    const tones={green:"#62917c",blue:"#6384a0",orange:"#b18b55",red:"#aa7070"};
+    const tones={green:"#14b878",blue:"#3187e8",orange:"#efa817",red:"#e45656"};
     const total = s.eq || 1;
-    const pct = n => `${(n / total * 100).toFixed(1)}%`;
-    const recentLoans = (state.rows.emprestimos || []).slice(0, 5), recentRepairs = (state.rows.manutencoes || []).slice(0, 5);
+    const pct = n => (n / total * 100).toFixed(1);
+    const loans = state.rows.emprestimos || [], repairs = state.rows.manutencoes || [];
     const catCounts = Object.entries(eq.reduce((a, item) => { const k = item.tipo || item.categoria || "Outros"; a[k] = (a[k] || 0) + 1; return a; }, {})).sort((a,b) => b[1]-a[1]).slice(0,5);
     const maxCat = Math.max(1,...catCounts.map(x=>x[1]));
-    const loanRows = recentLoans.length ? recentLoans.map(x => `<tr><td><div class="item-primary"><span class="item-thumb">⇄</span><b>${escapeHtml(mappedEquipmentLabel(x.equipamento_id))}</b></div></td><td>${escapeHtml(mappedName("alunos", x.aluno_id))}</td><td>${fmt(x.data_emprestimo)}</td><td>${badge(x.status)}</td></tr>`).join("") : emptyRow("Nenhum empréstimo cadastrado.", 4);
-    const repairRows = recentRepairs.length ? recentRepairs.map(x => `<tr><td><b>${escapeHtml(mappedName("equipamentos", x.equipamento_id))}</b></td><td>${escapeHtml(x.problema)}</td><td>${fmt(x.data)}</td><td>${badge(x.status)}</td></tr>`).join("") : emptyRow("Nenhuma manutenção cadastrada.", 4);
+    const activeLoans = loans.filter(x => ["Ativo", "Atrasado"].includes(x.status)).sort((a,b)=>new Date(a.data_prevista||0)-new Date(b.data_prevista||0)).slice(0,4);
+    const latestEquipment = [...eq].sort((a,b)=>new Date(b.updated_at||b.atualizado_em||b.created_at||b.criado_em||0)-new Date(a.updated_at||a.atualizado_em||a.created_at||a.criado_em||0))[0];
+    const activity = [
+      ...[...eq].map(row=>({row,table:"equipamentos",date:row.updated_at||row.atualizado_em||row.created_at||row.criado_em,user:row.updated_by||row.atualizado_por||row.created_by||row.criado_por,label:mappedEquipmentLabel(row.id),icon:"▣"})),
+      ...[...loans].map(row=>({row,table:"emprestimos",date:row.updated_at||row.atualizado_em||row.created_at||row.criado_em,user:row.updated_by||row.atualizado_por||row.created_by||row.criado_por,label:`Empréstimo · ${mappedEquipmentLabel(row.equipamento_id)}`,icon:"⇄"})),
+      ...[...repairs].map(row=>({row,table:"manutencoes",date:row.updated_at||row.atualizado_em||row.created_at||row.criado_em,user:row.updated_by||row.atualizado_por||row.created_by||row.criado_por,label:`Manutenção · ${mappedEquipmentLabel(row.equipamento_id)}`,icon:"⌁"})),
+      ...[...(state.rows.salas||[])].map(row=>({row,table:"salas",date:row.updated_at||row.atualizado_em||row.created_at||row.criado_em,user:row.updated_by||row.atualizado_por||row.created_by||row.criado_por,label:`Sala · ${row.nome||""}`,icon:"⌗"})),
+      ...[...(state.rows.alunos||[])].map(row=>({row,table:"alunos",date:row.updated_at||row.atualizado_em||row.created_at||row.criado_em,user:row.updated_by||row.atualizado_por||row.created_by||row.criado_por,label:`Aluno · ${row.nome||""}`,icon:"♙"}))
+    ].filter(item=>item.date).sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,4);
+    const activityRows = activity.length ? activity.map(item=>`<div class="feed-item"><span class="feed-symbol">${item.icon}</span><div class="feed-copy"><strong>${escapeHtml(item.label)}</strong><span>Atualizado por ${escapeHtml(item.user?mappedUser(item.user):"equipe TECNOBASE")}</span></div><time class="feed-time">${fmt(item.date,true)}</time></div>`).join("") : `<div class="empty-state">As atualizações aparecerão aqui quando houver registros com data no banco.</div>`;
+    const returnRows = activeLoans.length ? activeLoans.map(x=>`<div class="feed-item"><span class="feed-symbol">◷</span><div class="feed-copy"><strong>${escapeHtml(mappedEquipmentLabel(x.equipamento_id))}</strong><span>${escapeHtml(mappedName("alunos",x.aluno_id))} · ${escapeHtml(mappedName("salas",x.sala_id))}</span></div><time class="feed-time">${fmt(x.data_prevista)}</time></div>`).join("") : `<div class="empty-state">Nenhuma devolução pendente.</div>`;
+    const featured = latestEquipment ? `<div class="equipment"><img src="${equipmentImagePath(latestEquipment.tipo)}" alt="${escapeHtml(latestEquipment.tipo||"Equipamento")}"><div class="equipment-copy"><strong>${escapeHtml(mappedEquipmentLabel(latestEquipment.id))}</strong><small>${escapeHtml(mappedName("salas",latestEquipment.sala_id))} · ${escapeHtml(latestEquipment.patrimonio||"Sem patrimônio")}</small></div>${badge(latestEquipment.status)}</div>` : `<div class="empty-state">Cadastre um equipamento para ver o inventário em destaque.</div>`;
     const quickActions = canWrite() ? `<button class="button secondary" data-action="new" data-table="equipamentos">＋ Equipamento</button><button class="button secondary" data-action="new" data-table="salas">＋ Sala</button><button class="button primary" data-action="new" data-table="emprestimos">＋ Empréstimo</button>` : `<button class="button secondary" data-action="export" data-table="equipamentos">↓ Exportar dados</button>`;
-    return `${pageHeading("Visão geral", "Acompanhe os principais indicadores da tecnologia escolar.", quickActions)}<div class="metric-grid">${metric("Total de equipamentos",s.eq,"▣", "#3187e8","Itens cadastrados no sistema")}${metric("Disponíveis",s.avail,"✓","#14b878","Prontos para uso")}${metric("Emprestados",s.loaned,"⇄","#12b6d8","Em uso por alunos ou equipe")}${metric("Em manutenção",s.maint,"⌁","#efa817","Aguardando reparo")}${metric("Danificados",s.damaged,"!","#e45656","Precisam de atenção")}${metric("Total de alunos",s.students,"♙","#635be4","Alunos cadastrados")}${metric("Total de salas",s.rooms,"⌗","#3187e8","Espaços cadastrados")}${metric("Empréstimos ativos",s.loansActive,"↗","#12b6d8","Inclui itens atrasados")}${metric("Manutenções abertas",s.repairsOpen,"⚙","#efa817","Em andamento ou aguardando")}</div><div class="dashboard-grid"><section class="panel"><div class="panel-head"><div><h2 class="panel-title">Equipamentos por status</h2><div class="panel-subtitle">Distribuição atual do inventário</div></div><button class="link-button" data-page-link="equipamentos">Ver equipamentos →</button></div><div class="status-chart"><div class="donut" style="background:conic-gradient(${tones.green} 0 ${Number(pct(s.avail))}%,${tones.blue} ${Number(pct(s.avail))}% ${Number(pct(s.avail+s.loaned))}%,${tones.orange} ${Number(pct(s.avail+s.loaned))}% ${Number(pct(s.avail+s.loaned+s.maint))}%,${tones.red} ${Number(pct(s.avail+s.loaned+s.maint))}% 100%)"><div class="donut-center">${s.eq}<small>equipamentos</small></div></div><div class="legend">${[["Disponíveis",s.avail,tones.green],["Emprestados",s.loaned,tones.blue],["Manutenção",s.maint,tones.orange],["Danificados",s.damaged,tones.red]].map(([n,v,c])=>`<div class="legend-row"><span class="legend-name"><i class="legend-dot" style="--tone:${c}"></i>${n}</span><b>${v}</b></div>`).join("")}</div></div></section><section class="panel"><div class="panel-head"><div><h2 class="panel-title">Tipos de equipamentos</h2><div class="panel-subtitle">Quantidade por tipo de equipamento</div></div></div><div class="bars-chart">${catCounts.length ? catCounts.map(([n,v])=>`<div class="bar-group"><div class="bar-outer"><div class="bar-fill" style="--height:${Math.max(5,v/maxCat*100)}%"></div></div><small>${escapeHtml(n.slice(0,10))}</small></div>`).join("") : `<div class="empty-state">Cadastre equipamentos para ver o gráfico.</div>`}</div></section></div><div class="dashboard-grid"><section class="panel"><div class="panel-head"><div><h2 class="panel-title">Empréstimos recentes</h2><div class="panel-subtitle">Últimas movimentações de equipamentos</div></div><button class="link-button" data-page-link="emprestimos">Ver todos →</button></div><div class="table-wrap"><table><thead><tr><th>EQUIPAMENTO</th><th>ALUNO</th><th>DATA</th><th>STATUS</th></tr></thead><tbody>${loanRows}</tbody></table></div></section><section class="panel"><div class="panel-head"><div><h2 class="panel-title">Manutenções recentes</h2><div class="panel-subtitle">Acompanhamento de reparos</div></div><button class="link-button" data-page-link="manutencoes">Ver todas →</button></div><div class="table-wrap"><table><thead><tr><th>EQUIPAMENTO</th><th>PROBLEMA</th><th>DATA</th><th>STATUS</th></tr></thead><tbody>${repairRows}</tbody></table></div></section></div>`;
+    const damagedEnd = pct(s.avail+s.loaned+s.maint+s.damaged);
+    const unclassified = Math.max(0, s.eq-s.avail-s.loaned-s.maint-s.damaged);
+    const donut = s.eq ? `conic-gradient(${tones.green} 0 ${pct(s.avail)}%,${tones.blue} ${pct(s.avail)}% ${pct(s.avail+s.loaned)}%,${tones.orange} ${pct(s.avail+s.loaned)}% ${pct(s.avail+s.loaned+s.maint)}%,${tones.red} ${pct(s.avail+s.loaned+s.maint)}% ${damagedEnd}%,#66778a ${damagedEnd}% 100%)` : `conic-gradient(#354456 0 100%)`;
+    return `${pageHeading("Visão geral", "Acompanhe os equipamentos e a tecnologia da escola.", quickActions)}<section class="dashboard-primary-stats">${metric("Total de equipamentos",s.eq,"▣","#12b6d8","Inventário cadastrado")}${metric("Disponíveis",s.avail,"✓","#14b878",`${s.eq?Math.round(s.avail/s.eq*100):0}% prontos para uso`)}${metric("Emprestados",s.loaned,"⇄","#3187e8",`${s.loansActive} empréstimos ativos`)}${metric("Em manutenção",s.maint,"⌁","#efa817","Aguardando reparo")}</section><section class="dashboard-secondary-stats">${metric("Danificados",s.damaged,"!","#e45656","Precisam de atenção")}${metric("Alunos",s.students,"♙","#635be4","Cadastrados")}${metric("Salas",s.rooms,"⌗","#3187e8","Espaços cadastrados")}${metric("Manutenções abertas",s.repairsOpen,"⚙","#efa817","Em andamento ou aguardando")}</section><div class="dashboard-grid dashboard-main-grid"><section class="panel"><div class="panel-head"><div><h2 class="panel-title">Estado do inventário</h2><div class="panel-subtitle">Distribuição dos equipamentos por situação</div></div><button class="link-button" data-page-link="equipamentos">Ver inventário →</button></div><div class="status-chart"><div class="donut dashboard-donut" style="background:${donut}"><div class="donut-center"><b>${s.eq}</b><small>equipamentos</small></div></div><div class="legend">${[["Disponíveis",s.avail,tones.green],["Emprestados",s.loaned,tones.blue],["Manutenção",s.maint,tones.orange],["Com defeito",s.damaged,tones.red],...(unclassified?[["Outros status",unclassified,"#66778a"]]:[])].map(([n,v,c])=>`<div class="legend-row"><span class="legend-name"><i class="legend-dot" style="--tone:${c}"></i>${n}</span><b>${v}</b></div>`).join("")}</div></div><div class="dashboard-bars">${catCounts.length?catCounts.map(([n,v])=>`<div class="dashboard-bar-row"><span>${escapeHtml(n)}</span><i><b style="width:${Math.max(4,v/maxCat*100)}%"></b></i><strong>${v}</strong></div>`).join(""):`<div class="empty-state">Cadastre equipamentos para ver a quantidade por tipo.</div>`}</div></section><section class="panel"><div class="panel-head"><div><h2 class="panel-title">Atividade recente</h2><div class="panel-subtitle">Atualizações da equipe em tempo real</div></div><span class="realtime-caption">● Ao vivo</span></div><div class="dashboard-feed">${activityRows}</div></section></div><div class="dashboard-grid dashboard-bottom-grid"><section class="panel"><div class="panel-head"><div><h2 class="panel-title">Equipamentos em destaque</h2><div class="panel-subtitle">Acesso rápido ao inventário</div></div><button class="link-button" data-page-link="equipamentos">Ver todos →</button></div>${featured}</section><section class="panel"><div class="panel-head"><div><h2 class="panel-title">Próximas devoluções</h2><div class="panel-subtitle">Empréstimos ativos com prazo de devolução</div></div><button class="link-button" data-page-link="emprestimos">Abrir empréstimos →</button></div><div class="dashboard-feed">${returnRows}</div></section></div>`;
   }
   function emptyRow(message, cols) { return `<tr><td colspan="${cols}"><div class="empty-state">${escapeHtml(message)}</div></td></tr>`; }
   function columnsFor(table) {
@@ -228,7 +258,8 @@
     }
     if (def.type === "select") {
       const opts = def.name === "ativo" ? def.options.map(v=>[v,v==="true"?"Sim":"Não"]) : def.options.map(v=>[v,v]);
-      return `<div class="form-field ${full}"><label>${def.label}${def.required?" *":""}</label><select name="${def.name}" ${required}>${def.required?"":"<option value=\"\">Selecione</option>"}${opts.map(([v,label])=>`<option value="${escapeHtml(v)}" ${String(value)===String(v)?"selected":""}>${escapeHtml(label)}</option>`).join("")}</select></div>`;
+      const placeholder = value ? "" : '<option value="" selected disabled>Selecione</option>';
+      return `<div class="form-field ${full}"><label>${def.label}${def.required?" *":""}</label><select name="${def.name}" ${required}>${placeholder}${opts.map(([v,label])=>`<option value="${escapeHtml(v)}" ${String(value)===String(v)?"selected":""}>${escapeHtml(label)}</option>`).join("")}</select></div>`;
     }
     if (def.type === "ref") {
       let rows = state.rows[def.options] || [];
@@ -320,6 +351,61 @@
     const csv="\ufeff"+[headers.map(esc).join(";"),...rows.map(r=>headers.map(h=>esc(r[h])).join(";"))].join("\r\n");
     const url=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"})); const a=document.createElement("a"); a.href=url; a.download=`tecnobase-${table}-${new Date().toISOString().slice(0,10)}.csv`; a.click(); URL.revokeObjectURL(url); toast("Arquivo CSV exportado.","success");
   }
+  function supportUserName(id) {
+    if (id === state.user?.id) return state.profile?.nome || state.user?.email || "Você";
+    return mappedUser(id);
+  }
+  function supportErrorMessage(error) {
+    if (/suporte_mensagens|schema cache|does not exist/i.test(error?.message || "")) return "O chat ainda precisa ser ativado no Supabase. Execute o arquivo suporte-chat.sql uma vez no SQL Editor.";
+    return prettyError(error);
+  }
+  function renderSupportMessages() {
+    const list = $("#support-messages"), conversations = $("#support-conversations");
+    const participants = [...new Set(state.supportMessages.map(row => row.solicitante_id))];
+    const isAdmin = state.role === "administrador";
+    if (!isAdmin) state.supportRequesterId = state.user?.id || null;
+    else if (!participants.includes(state.supportRequesterId)) state.supportRequesterId = participants[0] || null;
+    conversations.hidden = !isAdmin;
+    conversations.innerHTML = isAdmin ? (participants.length ? participants.map(id => `<button type="button" class="support-contact ${id===state.supportRequesterId?"active":""}" data-support-requester="${escapeHtml(id)}"><span class="support-contact-avatar">${escapeHtml(supportUserName(id).trim().charAt(0).toUpperCase())}</span><span><b>${escapeHtml(supportUserName(id))}</b><small>Conversa de suporte</small></span></button>`).join("") : `<div class="support-empty-contact">As conversas aparecerão aqui quando alguém pedir ajuda.</div>`) : "";
+    const rows = state.supportMessages.filter(row => row.solicitante_id === state.supportRequesterId);
+    if (!rows.length) {
+      list.innerHTML = `<div class="support-welcome"><span>✦</span><b>Como podemos ajudar?</b><p>Conte o que aconteceu. Sua mensagem será enviada ao administrador do TECNOBASE.</p></div>`;
+      return;
+    }
+    list.innerHTML = rows.map(row => `<article class="support-message ${row.remetente_id===state.user?.id?"outgoing":"incoming"}"><small>${escapeHtml(supportUserName(row.remetente_id))} · ${fmt(row.created_at,true,true)}</small><p>${escapeHtml(row.mensagem)}</p></article>`).join("");
+    list.scrollTop = list.scrollHeight;
+  }
+  async function refreshSupportChat() {
+    const list = $("#support-messages");
+    if (!state.user || !db) return;
+    let query = db.from("suporte_mensagens").select("id, solicitante_id, remetente_id, mensagem, created_at").order("created_at", {ascending:true}).limit(500);
+    if (state.role !== "administrador") query = query.eq("solicitante_id", state.user.id);
+    const {data,error} = await query;
+    if (error) { list.innerHTML = `<div class="support-error">${escapeHtml(supportErrorMessage(error))}</div>`; return; }
+    state.supportMessages = data || [];
+    renderSupportMessages();
+  }
+  async function openSupportChat() {
+    $("#support-dialog").showModal();
+    await refreshSupportChat();
+    if (!state.supportChannel) {
+      state.supportChannel = db.channel(`tecnobase-support-${state.user.id}`).on("postgres_changes", {event:"*",schema:"public",table:"suporte_mensagens"}, () => refreshSupportChat()).subscribe();
+    }
+    setTimeout(() => $("#support-message")?.focus(), 50);
+  }
+  async function sendSupportMessage(event) {
+    event.preventDefault();
+    const field = $("#support-message"), message = field.value.trim();
+    if (!message || !state.user) return;
+    const requesterId = state.role === "administrador" ? state.supportRequesterId : state.user.id;
+    if (!requesterId) return toast("Selecione uma conversa para responder.","error");
+    const submit = $("button[type='submit']", event.currentTarget); submit.disabled = true;
+    const {error} = await db.from("suporte_mensagens").insert({solicitante_id:requesterId,remetente_id:state.user.id,mensagem:message});
+    submit.disabled = false;
+    if (error) return toast(supportErrorMessage(error),"error");
+    field.value = "";
+    await refreshSupportChat();
+  }
   function loginError(error) { const e=prettyError(error); return /Invalid login credentials/i.test(e)?"E-mail ou senha incorretos.":e; }
   async function boot() {
     $("#year").textContent=new Date().getFullYear();
@@ -327,19 +413,23 @@
     const rememberedEmail=localStorage.getItem("tecnobase.rememberedEmail"); if(rememberedEmail)$("#login-email").value=rememberedEmail;
     if (!db) { $("#login-form").addEventListener("submit",e=>{e.preventDefault();toast("A biblioteca ou configuração do Supabase não foi carregada.","error")}); return; }
     const {data:{session}}=await db.auth.getSession(); if(session?.user) await showApp(session.user);
-    db.auth.onAuthStateChange((event,session)=>{ if(event==="SIGNED_OUT"){stopRealtime();state.user=null;$("#app-shell").classList.add("hidden");$("#login-screen").classList.remove("hidden")} else if(session?.user){state.user=session.user;setTimeout(()=>showApp(session.user),0)} });
+    db.auth.onAuthStateChange((event,session)=>{ if(event==="SIGNED_OUT"){stopRealtime();if(state.supportChannel)db.removeChannel(state.supportChannel);state.supportChannel=null;state.user=null;$("#app-shell").classList.add("hidden");$("#login-screen").classList.remove("hidden")} else if(session?.user){state.user=session.user;setTimeout(()=>showApp(session.user),0)} });
   }
   async function showApp(user) { state.user=user; startRealtime(); $("#login-screen").classList.add("hidden");$("#app-shell").classList.remove("hidden");$("#page-content").innerHTML=`${pageHeading("Carregando…","Buscando os dados da escola.")}<div class="metric-grid">${Array(6).fill('<div class="skeleton"></div>').join("")}</div>`; await loadData(); }
   $("#login-form").addEventListener("submit",async e=>{e.preventDefault();const email=$("#login-email").value.trim();if($("#remember-me").checked)localStorage.setItem("tecnobase.rememberedEmail",email);else localStorage.removeItem("tecnobase.rememberedEmail");const b=$("button[type=submit]",e.currentTarget);b.disabled=true;const old=b.innerHTML;b.textContent="Entrando…";const {error}=await db.auth.signInWithPassword({email,password:$("#login-password").value});b.disabled=false;b.innerHTML=old;if(error)toast(loginError(error),"error")});
   $("#forgot-password").addEventListener("click",async()=>{const email=$("#login-email").value.trim();if(!email)return toast("Informe seu e-mail antes de solicitar a recuperação.","error");const {error}=await db.auth.resetPasswordForEmail(email,{redirectTo:location.href.split("#")[0]});if(error)toast(prettyError(error),"error");else toast("Se este e-mail estiver cadastrado, você receberá um link para redefinir sua senha.","success")});
   $("#logout-button").addEventListener("click",async()=>{const {error}=await db.auth.signOut();if(error)toast(prettyError(error),"error")});
   $("#refresh-button").addEventListener("click",async()=>{await loadData();toast("Dados atualizados.","success")});
+  $("#open-support-chat").addEventListener("click",openSupportChat);
+  $("#support-form").addEventListener("submit",sendSupportMessage);
   $("#record-form").addEventListener("submit",saveRecord);
   $("#record-dialog").addEventListener("change",e=>{if(e.target.name==="equipamento_id"&&$("#record-form").dataset.table==="emprestimos"){const equipment=state.rows.equipamentos.find(item=>item.id===e.target.value);const room=$("#dialog-fields [name='sala_id']");if(room&&equipment?.sala_id)room.value=equipment.sala_id;}});
   $("#record-dialog").addEventListener("change",e=>{if($("#record-form").dataset.table!=="equipamentos")return;if(e.target.name==="tipo")refreshEquipmentOptions(true,true);if(e.target.name==="marca")refreshEquipmentOptions(true,false);if(["tipo","marca","modelo"].includes(e.target.name))refreshEquipmentPreview();});
   $("#record-dialog").addEventListener("change",e=>{if($("#record-form").dataset.table!=="equipamentos"||!e.target.name.endsWith("_choice"))return;const input=e.target.parentElement.querySelector(`input[name='${e.target.name.replace("_choice", "")}']`);if(!input)return;const enabled=e.target.value==="informar";input.disabled=!enabled;input.hidden=!enabled;input.required=enabled;if(!enabled)input.value="";});
   document.addEventListener("click",async e=>{
     if(e.target.closest("#settings-signout")){const {error}=await db.auth.signOut();if(error)toast(prettyError(error),"error");return;}
+    if(e.target.closest("[data-close-support]")){ $("#support-dialog").close();return; }
+    const contact=e.target.closest("[data-support-requester]"); if(contact){state.supportRequesterId=contact.dataset.supportRequester;renderSupportMessages();return;}
     const nav=e.target.closest("[data-page]"); if(nav){goPage(nav.dataset.page);return;}
     const pageLink=e.target.closest("[data-page-link]"); if(pageLink){goPage(pageLink.dataset.pageLink);return;}
     const close=e.target.closest("[data-close-dialog]"); if(close){$("#record-dialog").close();return;}
