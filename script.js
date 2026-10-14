@@ -135,20 +135,23 @@
     }
     const name = profile?.nome || state.user.email?.split("@")[0] || "Usuário";
     $("#user-name").textContent = name; $("#user-role").textContent = roleLabels[state.role] || "Visualização";
-    const userAvatar = $("#user-avatar"), normalizedName = name.trim().toLocaleLowerCase("pt-BR");
+    const userAvatar = $("#user-avatar"), topAvatar = $("#top-avatar"), normalizedName = name.trim().toLocaleLowerCase("pt-BR");
     const normalizedEmail = (state.user.email || "").trim().toLocaleLowerCase("pt-BR");
     const isThales = normalizedName.includes("thales") || normalizedEmail === "thalesmenezes937@gmail.com";
     const isDaniela = normalizedName.includes("daniela") || normalizedEmail.includes("daniela");
     if (isThales || isDaniela) {
-      const photo = isDaniela ? "assets/daniela-profile.jpeg" : "assets/thales-profile.jpeg";
+      const photo = isDaniela ? "assets/daniela-profile.jpeg?v=2" : "assets/thales-profile.jpeg?v=2";
       const alt = isDaniela ? "Foto de Daniela Moreira" : "Foto de Thales Menezes";
       userAvatar.classList.add("has-profile-photo");
-      userAvatar.innerHTML = `<img src="${photo}" alt="${alt}">`;
+      userAvatar.innerHTML = `<img class="profile-photo-image" src="${photo}" alt="${alt}" onerror="this.remove(); this.parentElement.classList.remove('has-profile-photo'); this.parentElement.textContent='${escapeHtml(name.trim().charAt(0).toUpperCase())}'">`;
+      topAvatar.classList.add("has-profile-photo");
+      topAvatar.innerHTML = `<img class="profile-photo-image" src="${photo}" alt="${alt}" onerror="this.remove(); this.parentElement.classList.remove('has-profile-photo'); this.parentElement.textContent='${escapeHtml(name.trim().charAt(0).toUpperCase())}'">`;
     } else {
       userAvatar.classList.remove("has-profile-photo");
       userAvatar.textContent = name.trim().charAt(0).toUpperCase();
+      topAvatar.classList.remove("has-profile-photo");
+      topAvatar.textContent = name.trim().charAt(0).toUpperCase();
     }
-    $("#top-avatar").textContent = name.trim().charAt(0).toUpperCase();
     renderUpdateIndicator();
     renderPage();
   }
