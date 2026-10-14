@@ -83,7 +83,8 @@
   }
   function renderUpdateIndicator() {
     const latest = latestUpdate(), el = $("#last-update"); if (!el) return;
-    const person = latest ? (latest.userName || mappedUser(latest.userId)) : "";
+    const storedName = latest?.userName?.trim();
+    const person = latest ? (storedName && storedName.toLocaleLowerCase("pt-BR") !== "usuário" ? storedName : mappedUser(latest.userId)) : "";
     el.innerHTML = latest ? `Última atualização por <b>${escapeHtml(person)}</b><small>${fmt(latest.date, true, true)}</small>` : "Última atualização por —";
     el.title = latest ? `${person} atualizou ${titleCase(latest.table)} em ${fmt(latest.date, true, true)}` : "Ainda não há registros atualizados.";
   }
