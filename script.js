@@ -64,7 +64,7 @@
   }
   function mappedUser(id) { const row = state.userDirectory.find(item => item.id === id) || (state.rows.perfis || []).find(item => item.id === id); return row?.nome || row?.email || "Usuário"; }
   function latestUpdate() {
-    const auditRecords = (state.rows.historico || []).map(row => ({ date: row.created_at, userId: row.user_id, userName: row.usuario_nome, table: row.entidade || "sistema" }));
+    const auditRecords = (state.rows.historico_atualizacoes || []).map(row => ({ date: row.created_at, userId: row.user_id, userName: row.usuario_nome, table: row.entidade || "sistema" }));
     const records = [...auditRecords, ...["equipamentos", "salas", "alunos", "emprestimos", "manutencoes"].flatMap(table => (state.rows[table] || []).map(row => ({ date: row.updated_at || row.atualizado_em || row.created_at || row.criado_em, userId: row.updated_by || row.atualizado_por || row.created_by || row.criado_por, table })))];
     return records.filter(item => item.date && item.userId).sort((a,b) => new Date(b.date) - new Date(a.date))[0] || null;
   }
@@ -101,7 +101,7 @@
   }
   async function loadData({ silent = false } = {}) {
     if (!db || !state.user) return;
-    const names = ["equipamentos", "salas", "alunos", "emprestimos", "manutencoes", "perfis", "historico"];
+    const names = ["equipamentos", "salas", "alunos", "emprestimos", "manutencoes", "perfis", "historico_atualizacoes"];
     const [results, directoryResult, roleResult] = await Promise.all([
       // Older tables created manually in Supabase may not have created_at yet.
       // Avoid ordering on that optional field at query time; sort locally when present.
@@ -155,7 +155,7 @@
   function startRealtime() {
     if (!db || !state.user || state.realtimeChannel || state.realtimeRetryTimer) return;
     setRealtimeStatus("connecting");
-    const tables = ["equipamentos", "salas", "alunos", "emprestimos", "manutencoes", "historico"];
+    const tables = ["equipamentos", "salas", "alunos", "emprestimos", "manutencoes", "historico_atualizacoes"];
     const channelId = ++state.realtimeChannelSequence;
     let channel = db.channel(`tecnobase-live-${state.user.id}-${channelId}`);
     for (const table of tables) channel = channel.on("postgres_changes", { event: "*", schema: "public", table }, () => {
