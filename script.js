@@ -64,7 +64,7 @@
   }
   function mappedUser(id) { const row = state.userDirectory.find(item => item.id === id) || (state.rows.perfis || []).find(item => item.id === id); return row?.nome || row?.email || "Usuário"; }
   function latestUpdate() {
-    const auditRecords = (state.rows.historico || []).map(row => ({ date: row.created_at, userId: row.user_id, table: row.entidade || "sistema" }));
+    const auditRecords = (state.rows.historico || []).map(row => ({ date: row.created_at, userId: row.user_id, userName: row.usuario_nome, table: row.entidade || "sistema" }));
     const records = [...auditRecords, ...["equipamentos", "salas", "alunos", "emprestimos", "manutencoes"].flatMap(table => (state.rows[table] || []).map(row => ({ date: row.updated_at || row.atualizado_em || row.created_at || row.criado_em, userId: row.updated_by || row.atualizado_por || row.created_by || row.criado_por, table })))];
     return records.filter(item => item.date && item.userId).sort((a,b) => new Date(b.date) - new Date(a.date))[0] || null;
   }
@@ -83,8 +83,9 @@
   }
   function renderUpdateIndicator() {
     const latest = latestUpdate(), el = $("#last-update"); if (!el) return;
-    el.innerHTML = latest ? `Última atualização por <b>${escapeHtml(mappedUser(latest.userId))}</b><small>${fmt(latest.date, true, true)}</small>` : "Última atualização por —";
-    el.title = latest ? `${mappedUser(latest.userId)} atualizou ${titleCase(latest.table)} em ${fmt(latest.date, true, true)}` : "Ainda não há registros atualizados.";
+    const person = latest ? (latest.userName || mappedUser(latest.userId)) : "";
+    el.innerHTML = latest ? `Última atualização por <b>${escapeHtml(person)}</b><small>${fmt(latest.date, true, true)}</small>` : "Última atualização por —";
+    el.title = latest ? `${person} atualizou ${titleCase(latest.table)} em ${fmt(latest.date, true, true)}` : "Ainda não há registros atualizados.";
   }
   function setRealtimeStatus(status) {
     const el = $("#realtime-status"); if (!el) return;
