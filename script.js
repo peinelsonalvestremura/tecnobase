@@ -285,7 +285,7 @@
     const th = columns.map(([,label])=>`<th>${label.toUpperCase()}</th>`).join("");
     return `${pageHeading(page.title,titleSub,add)}<div class="toolbar"><label class="search-box"><span>⌕</span><input id="table-search" type="search" value="${escapeHtml(state.filters.q)}" placeholder="Buscar ${config.singular}..."></label>${queryFilter}<span class="muted" style="font-size:10px;margin-left:auto">${rows.length} registro${rows.length===1?"":"s"}</span></div><section class="panel data-panel"><div class="table-wrap"><table><thead><tr>${th}<th>AÇÕES</th></tr></thead><tbody>${dataRows}</tbody></table></div></section>${table === "perfis" ? `<section class="panel" style="margin-top:14px"><div class="panel-head"><div><h2 class="panel-title">Gerenciamento de usuários</h2><div class="panel-subtitle">Contas são criadas no Supabase Auth; depois, atribua o perfil nesta lista.</div></div></div><p class="muted" style="font-size:11px;line-height:1.7">Por segurança, um aplicativo no navegador não pode criar contas administrativas nem alterar senhas de outros usuários. Crie o usuário em Supabase → Authentication → Users e cadastre ou ajuste seu perfil na tabela <b>perfis</b>. O SQL do projeto inclui políticas para esse gerenciamento.</p></section>` : ""}`;
   }
-  function renderReports() { return `${pageHeading("Relatórios", "Exporte os dados do sistema para análise e prestação de contas.")}<div class="report-grid">${[["Inventário de equipamentos","Lista completa com tipo, marca, modelo, sala e patrimônio.","equipamentos","▣"],["Empréstimos","Empréstimos ativos, concluídos e respectivas datas.","emprestimos","⇄"],["Manutenções","Histórico de reparos e prioridades registradas.","manutencoes","⌁"],["Cadastro de alunos","Alunos e turmas cadastradas.","alunos","♙"],["Salas","Espaços e responsáveis.","salas","⌗"]].map(([t,d,table,ico])=>`<section class="panel report-card"><div class="report-symbol">${ico}</div><div><h3>${t}</h3><p>${d}</p><button class="button secondary small" data-action="export" data-table="${table}">↓ Baixar CSV</button></div></section>`).join("")}</div>`; }
+  function renderReports() { return `${pageHeading("Relatórios", "Exporte os dados do sistema para análise e prestação de contas.")}<div class="report-grid">${[["Inventário de equipamentos","Relatório organizado para impressão ou para salvar como PDF.","equipamentos","▣"],["Empréstimos","Empréstimos ativos, concluídos e respectivas datas.","emprestimos","⇄"],["Manutenções","Histórico de reparos e prioridades registradas.","manutencoes","⌁"],["Cadastro de alunos","Alunos e turmas cadastradas.","alunos","♙"],["Salas","Espaços e responsáveis.","salas","⌗"]].map(([t,d,table,ico])=>`<section class="panel report-card"><div class="report-symbol">${ico}</div><div><h3>${t}</h3><p>${d}</p><button class="button secondary small" data-action="export" data-table="${table}">${table==="equipamentos"?"↓ Gerar relatório PDF":"↓ Baixar CSV"}</button></div></section>`).join("")}</div>`; }
   function renderSettings() { return `${pageHeading("Configurações", "Preferências e informações do ambiente TECNOBASE.")}<div class="settings-grid"><section class="panel settings-card"><h3>Conta conectada</h3><p>${escapeHtml(state.user?.email || "")}</p><p>Perfil atual: <b>${escapeHtml(roleLabels[state.role] || state.role)}</b></p><button class="button secondary small" id="settings-signout">Sair da conta</button></section><section class="panel settings-card"><h3>Conexão e segurança</h3><p>Autenticação persistente gerenciada pelo Supabase. Todas as tabelas são protegidas por Row Level Security (RLS).</p><p>O acesso aos dados depende do perfil registrado no banco.</p><span class="badge green">Conexão autenticada</span></section><section class="panel settings-card"><h3>Preferências de exibição</h3><p>Idioma: Português (Brasil)<br>Fuso horário: horário local do dispositivo<br>Interface responsiva para computador, tablet e celular.</p></section><section class="panel settings-card"><h3>Sobre o TECNOBASE</h3><p>Gestão de Tecnologia Escolar<br>Controle de equipamentos, salas, alunos, empréstimos e manutenções.</p><span class="badge blue">Versão 1.0</span></section></div>`; }
   function renderPage() {
     const page = pages[state.page]; if (!page) return;
@@ -435,6 +435,38 @@
       if (button) { button.disabled=false; button.textContent=button.dataset.originalText||"↓ Baixar CSV"; delete button.dataset.originalText; }
     }
   }
+  async function exportEquipmentPdf() {
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) return toast("O navegador bloqueou a janela do relatório. Permita pop-ups para este site e tente novamente.", "error");
+    const button=document.querySelector('[data-action="export"][data-table="equipamentos"]');
+    if (button) { button.disabled=true; button.dataset.originalText=button.textContent; button.textContent="Preparando PDF…"; }
+    try {
+      const rows=[]; const pageSize=1000; let offset=0;
+      while (true) {
+        const {data,error}=await db.from("equipamentos").select("*").order("id",{ascending:true}).range(offset,offset+pageSize-1);
+        if (error) throw error;
+        rows.push(...(data||[]));
+        if (!data || data.length<pageSize) break;
+        offset+=pageSize;
+      }
+      if (!rows.length) { printWindow.close(); return toast("Não há equipamentos cadastrados para incluir no relatório.","error"); }
+      const statuses=["Disponível","Emprestado","Em manutenção","Danificado","Inservível"];
+      const counts=Object.fromEntries(statuses.map(status=>[status,rows.filter(row=>String(row.status||"").toLocaleLowerCase("pt-BR")===status.toLocaleLowerCase("pt-BR")).length]));
+      const safe=escapeHtml;
+      const reportRows=rows.map(row=>`<tr><td>${safe(row.tipo||"—")}</td><td>${safe(row.marca||"—")}</td><td>${safe(row.modelo||"—")}</td><td>${safe(row.patrimonio||"Sem patrimônio")}</td><td>${safe(row.numero_serie||"Sem número")}</td><td>${safe(mappedName("salas",row.sala_id))}</td><td><span class="status">${safe(row.status||"—")}</span></td></tr>`).join("");
+      const generated=new Intl.DateTimeFormat("pt-BR",{dateStyle:"long",timeStyle:"short"}).format(new Date());
+      printWindow.document.open();
+      printWindow.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Inventário TECNOBASE</title><style>
+        @page{size:A4 landscape;margin:14mm}*{box-sizing:border-box}body{font:12px Arial,sans-serif;color:#1b2b40;margin:0;background:#fff}.top{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #13b9d5;padding:0 0 14px}.brand{font-size:20px;font-weight:800;letter-spacing:1px;color:#10243b}.brand small{display:block;font-size:9px;letter-spacing:2px;color:#728299;margin-top:4px}.stamp{text-align:right;color:#64758a;font-size:10px}.title{margin:20px 0 14px}.title h1{font-size:23px;margin:0 0 5px;color:#10243b}.title p{margin:0;color:#718097;font-size:11px}.summary{display:flex;gap:9px;margin:14px 0 20px}.card{flex:1;padding:10px 12px;border:1px solid #dbe4ed;border-radius:8px;background:#f7f9fc}.card b{display:block;font-size:17px;color:#142a43}.card span{display:block;color:#69798d;font-size:9px;margin-top:3px}.card.available{border-top:3px solid #13b878}.card.loaned{border-top:3px solid #3187e8}.card.maintenance{border-top:3px solid #efa817}.card.damaged{border-top:3px solid #e45656}.card.unserviceable{border-top:3px solid #8794a5}table{width:100%;border-collapse:collapse;font-size:9px}thead{display:table-header-group}th{background:#15273d;color:#fff;text-align:left;padding:9px 7px;font-size:8px;letter-spacing:.5px;text-transform:uppercase}td{padding:8px 7px;border-bottom:1px solid #e4eaf0;vertical-align:top}tbody tr:nth-child(even){background:#f5f8fb}.status{font-weight:700;color:#31516e}.foot{display:flex;justify-content:space-between;border-top:1px solid #dbe4ed;margin-top:16px;padding-top:8px;color:#8290a2;font-size:9px}.hint{margin-top:11px;color:#718097;font-size:9px}@media print{.hint{display:none}}
+        </style></head><body><header class="top"><div class="brand">TECNOBASE<small>GESTÃO DE TECNOLOGIA ESCOLAR</small></div><div class="stamp">RELATÓRIO DE INVENTÁRIO<br>Gerado em ${safe(generated)}</div></header><section class="title"><h1>Inventário de equipamentos</h1><p>Relação completa dos equipamentos cadastrados e sua situação atual.</p></section><section class="summary"><div class="card"><b>${rows.length}</b><span>Total de equipamentos</span></div><div class="card available"><b>${counts["Disponível"]}</b><span>Disponíveis</span></div><div class="card loaned"><b>${counts["Emprestado"]}</b><span>Emprestados</span></div><div class="card maintenance"><b>${counts["Em manutenção"]}</b><span>Em manutenção</span></div><div class="card damaged"><b>${counts["Danificado"]}</b><span>Danificados</span></div><div class="card unserviceable"><b>${counts["Inservível"]}</b><span>Inservíveis</span></div></section><table><thead><tr><th>Tipo</th><th>Marca</th><th>Modelo</th><th>Patrimônio</th><th>Nº de série</th><th>Sala</th><th>Status</th></tr></thead><tbody>${reportRows}</tbody></table><p class="hint">Na janela de impressão, escolha “Salvar como PDF” como destino para baixar o arquivo em PDF.</p><footer class="foot"><span>TECNOBASE · Inventário escolar</span><span>${rows.length} registro${rows.length===1?"":"s"}</span></footer><script>window.addEventListener("load",()=>setTimeout(()=>window.print(),250));</script></body></html>`);
+      printWindow.document.close();
+      toast(`Relatório pronto com ${rows.length} equipamento${rows.length===1?"":"s"}. Escolha “Salvar como PDF” na impressão.`,"success");
+    } catch(error) {
+      printWindow.close(); console.error("Falha ao gerar relatório de inventário",error); toast(`Não foi possível preparar o relatório. ${prettyError(error)}`,"error");
+    } finally {
+      if (button) { button.disabled=false; button.textContent=button.dataset.originalText||"↓ Gerar relatório PDF"; delete button.dataset.originalText; }
+    }
+  }
   function supportUserName(id) {
     if (id === state.user?.id) return state.profile?.nome || state.user?.email || "Você";
     return mappedUser(id);
@@ -546,7 +578,7 @@
     if(e.target.closest("[data-close-detail]")){ $("#detail-dialog").close();return; }
     const action=e.target.closest("[data-action]"); if(!action)return;
     const {action:act,table,id}=action.dataset;
-    if(act==="new")openRecord(table); if(act==="edit")openRecord(table,id); if(act==="detail")openDetail(table,id); if(act==="delete")await deleteRecord(table,id); if(act==="export")exportCsv(table);
+    if(act==="new")openRecord(table); if(act==="edit")openRecord(table,id); if(act==="detail")openDetail(table,id); if(act==="delete")await deleteRecord(table,id); if(act==="export"){if(table==="equipamentos")exportEquipmentPdf();else exportCsv(table)}
   });
   $("#page-content").addEventListener("input",e=>{if(e.target.id==="table-search"){state.filters.q=e.target.value;const pos=e.target.selectionStart;renderPage();const input=$("#table-search");input?.focus();input?.setSelectionRange(pos,pos)}});
   $("#page-content").addEventListener("change",e=>{if(e.target.id==="status-filter"){state.filters.status=e.target.value;renderPage()}});
