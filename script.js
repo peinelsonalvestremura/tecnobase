@@ -2,10 +2,10 @@
   const db = window.supabaseClient;
   const $ = (s, root = document) => root.querySelector(s);
   const $$ = (s, root = document) => [...root.querySelectorAll(s)];
-  const state = { user: null, profile: null, role: "visualizacao", page: "dashboard", rows: {}, userDirectory: [], filters: { q: "", status: "", turma: "" }, busy: false, realtimeChannel: null, realtimeRefreshTimer: null, realtimeRetryTimer: null, realtimeRetryCount: 0, realtimeChannelSequence: 0, supportMessages: [], supportRequesterId: null, supportChannel: null };
+  const state = { user: null, profile: null, role: "visualizacao", page: "dashboard", rows: {}, userDirectory: [], filters: { q: "", status: "", turma: "", date: "" }, busy: false, realtimeChannel: null, realtimeRefreshTimer: null, realtimeRetryTimer: null, realtimeRetryCount: 0, realtimeChannelSequence: 0, supportMessages: [], supportRequesterId: null, supportChannel: null, serviceWorkerRegistration: null, installPrompt: null };
   const roleLabels = { administrador: "Administrador", usuario: "Usuário", visualizacao: "Visualização" };
   const pages = {
-    dashboard: { title: "Dashboard", table: null }, equipamentos: { title: "Equipamentos", table: "equipamentos" }, salas: { title: "Salas", table: "salas" }, alunos: { title: "Alunos", table: "alunos" }, emprestimos: { title: "Empréstimos", table: "emprestimos" }, manutencoes: { title: "Manutenções", table: "manutencoes" }, relatorios: { title: "Relatórios", table: null }, usuarios: { title: "Usuários", table: "perfis" }, configuracoes: { title: "Configurações", table: null }
+    dashboard: { title: "Dashboard", table: null }, equipamentos: { title: "Equipamentos", table: "equipamentos" }, salas: { title: "Salas", table: "salas" }, alunos: { title: "Alunos", table: "alunos" }, emprestimos: { title: "Empréstimos", table: "emprestimos" }, manutencoes: { title: "Manutenções", table: "manutencoes" }, tarefas: { title: "Tarefas e lembretes", table: "tarefas" }, relatorios: { title: "Relatórios", table: null }, usuarios: { title: "Usuários", table: "perfis" }, configuracoes: { title: "Configurações", table: null }
   };
   const configs = {
     equipamentos: { singular: "equipamento", icon: "▣", search: ["marca", "tipo", "modelo", "nome", "patrimonio", "numero_serie"], fields: [f("tipo", "Tipo", "select", true, ["Tablet", "Notebook", "Computador / PC", "Televisor", "Smartphone", "Plataforma de recarga"]), f("marca", "Marca", "equipment-brand", true), f("modelo", "Modelo", "equipment-model", true), f("numero_serie", "Número de série", "optional-code"), f("patrimonio", "Patrimônio", "optional-code"), f("sala_id", "Sala", "ref", true, "salas"), f("status", "Status", "select", true, ["Disponível", "Emprestado", "Em manutenção", "Danificado", "Inservível", "Aguardando Garantia", "Não Localizado"]), f("descricao", "Observações", "textarea")] },
@@ -13,6 +13,7 @@
     alunos: { singular: "aluno", icon: "♙", search: ["nome", "turma", "matricula"], fields: [f("nome", "Nome completo", "text", true), f("turma", "Turma", "select", true, ["1ª Série A", "1ª Série B", "2ª Série A", "2ª Série B", "3ª Série A", "3ª Série B"]), f("matricula", "RA (Registro do Aluno)", "text", true)] },
     emprestimos: { singular: "empréstimo", icon: "⇄", search: ["responsavel", "professor_solicitante", "turma", "horario", "status", "observacao"], fields: [f("equipamento_id", "Equipamento", "ref", true, "equipamentos"), f("aluno_id", "Aluno · nome completo", "ref", true, "alunos"), f("professor_solicitante", "Professor solicitante", "text", true), f("responsavel", "Responsável pelo empréstimo", "text", true), f("turma", "Turma", "text", true), f("horario", "Horário da aula", "time", true), f("sala_id", "Sala de destino", "ref", true, "salas"), f("data_emprestimo", "Data do empréstimo", "date", true), f("data_prevista", "Devolução prevista", "date", true), f("status", "Status", "select", true, ["Ativo", "Devolvido", "Atrasado"]), f("observacao", "Observações", "textarea")] },
     manutencoes: { singular: "manutenção", icon: "⌁", search: ["tipo", "problema", "descricao", "responsavel", "status"], fields: [f("equipamento_id", "Equipamento", "ref", true, "equipamentos"), f("tipo", "Tipo de manutenção", "select", true, ["Corretiva", "Preventiva"]), f("problema", "Problema identificado", "text", true), f("prioridade", "Prioridade", "select", true, ["Baixa", "Média", "Alta", "Urgente"]), f("status", "Status", "select", true, ["Aberta", "Em andamento", "Concluída"]), f("data", "Data", "date", true), f("responsavel", "Responsável", "text"), f("descricao", "Descrição", "textarea")] },
+    tarefas: { singular: "tarefa", icon: "◷", search: ["titulo", "observacoes", "status"], fields: [f("titulo", "Tarefa ou lembrete", "text", true), f("reminder_at", "Data e horário", "datetime-local", true), f("responsavel_id", "Responsável", "task-user", true), f("observacoes", "Observações", "textarea"), f("status", "Estado", "select", true, ["Pendente", "Concluída"])] },
     perfis: { singular: "perfil", icon: "♧", search: ["nome", "email", "perfil"], fields: [f("id", "ID do usuário no Supabase Auth", "text", true), f("nome", "Nome completo", "text", true), f("email", "E-mail", "email", true), f("perfil", "Perfil de acesso", "select", true, ["administrador", "usuario", "visualizacao"]), f("ativo", "Acesso ativo", "select", true, ["true", "false"])] },
   };
   function f(name, label, type = "text", required = false, options = []) { return { name, label, type, required, options }; }
@@ -58,10 +59,19 @@
   const fmt = (value, time = false, fullYear = false) => { if (!value) return "—"; const d = new Date(value); return Number.isNaN(+d) ? value : new Intl.DateTimeFormat("pt-BR", time ? { dateStyle: fullYear ? "medium" : "short", timeStyle: "short" } : { dateStyle: "short" }).format(d); };
   const escapeHtml = (v) => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   function toast(message, kind = "") { const el = document.createElement("div"); el.className = `toast ${kind}`; el.textContent = message; $("#toast-region").append(el); setTimeout(() => el.remove(), 4100); }
-  function prettyError(error) { const msg = error?.message || "Não foi possível concluir esta ação."; if (/row-level security|permission denied|not authorized/i.test(msg)) return "Seu perfil não tem permissão para esta ação."; if (/relation .* does not exist|could not find the table/i.test(msg)) return "As tabelas ainda não foram criadas. Execute o arquivo schema.sql no Supabase."; if (/invalid api key|jwt/i.test(msg)) return "A configuração pública do Supabase precisa ser conferida."; return msg; }
+  function prettyError(error) {
+    const raw = String(error?.message || "");
+    if (/failed to fetch|fetch failed|networkerror|network request failed|load failed|err_name_not_resolved|err_connection|cors/i.test(raw)) return "Não consegui alcançar o servidor TECNOBASE. Confira sua internet e tente novamente; se persistir, verifique se o projeto Supabase está ativo e se a URL pública está correta.";
+    const msg = error?.message || "Não foi possível concluir esta ação.";
+    if (/row-level security|permission denied|not authorized/i.test(msg)) return "Seu perfil não tem permissão para esta ação.";
+    if (/relation .*tarefas|could not find the table .*tarefas/i.test(msg)) return "A área de tarefas ainda não está no banco. Execute tarefas-notificacoes.sql no Supabase.";
+    if (/relation .* does not exist|could not find the table/i.test(msg)) return "As tabelas ainda não foram criadas. Confira o SQL de configuração do TECNOBASE no Supabase.";
+    if (/invalid api key|jwt/i.test(msg)) return "A configuração pública do Supabase precisa ser conferida.";
+    return msg;
+  }
   function canWrite() { return state.role === "administrador" || state.role === "usuario"; }
   function isAdmin() { return state.role === "administrador"; }
-  function statusClass(status) { const s = String(status || "").toLowerCase(); if (/inservível|inservivel|não localizado|nao localizado/.test(s)) return "gray"; if (/disponível|devolvido|concluída|concluido|ativo/.test(s) && !/inativo/.test(s)) return "green"; if (/manutenção|andamento|garantia/.test(s)) return "orange"; if (/defeito|danificado|atrasado|aberta|urgente/.test(s)) return "red"; if (/emprestado/.test(s)) return "blue"; if (/visualização/.test(s)) return "purple"; return ""; }
+  function statusClass(status) { const s = String(status || "").toLowerCase(); if (/inservível|inservivel|não localizado|nao localizado/.test(s)) return "gray"; if (/disponível|devolvido|concluída|concluido|ativo/.test(s) && !/inativo/.test(s)) return "green"; if (/manutenção|andamento|garantia/.test(s)) return "orange"; if (/defeito|danificado|atrasad|aberta|urgente/.test(s)) return "red"; if (/emprestado/.test(s)) return "blue"; if (/visualização/.test(s)) return "purple"; return ""; }
   function badge(value) { return `<span class="badge ${statusClass(value)}">${escapeHtml(value || "—")}</span>`; }
   function titleCase(str) { return str.replaceAll("_", " ").replace(/^./, c => c.toUpperCase()); }
   function mappedName(table, id) { const row = state.rows[table]?.find(item => item.id === id); return row?.nome || row?.patrimonio || "—"; }
@@ -71,6 +81,9 @@
     return [row.tipo, [row.marca, row.modelo].filter(Boolean).join(" ")].filter(Boolean).join(" · ") || row.nome || "—";
   }
   function mappedUser(id) { const row = state.userDirectory.find(item => item.id === id) || (state.rows.perfis || []).find(item => item.id === id); return row?.nome || row?.email || "Usuário"; }
+  function localDateTimeValue(value) { const date=value?new Date(value):new Date(Date.now()+60*60*1000); if(Number.isNaN(date.getTime()))return ""; return new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,16); }
+  function localDateValue(value) { const date=new Date(value); return Number.isNaN(date.getTime())?"":new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,10); }
+  function isTaskOwner(task) { return task?.created_by === state.user?.id; }
   function latestUpdate() {
     const auditRecords = (state.rows.historico_atualizacoes || []).map(row => ({ date: row.created_at, userId: row.user_id, userName: row.usuario_nome, table: row.entidade || "sistema" }));
     const records = [...auditRecords, ...["equipamentos", "salas", "alunos", "emprestimos", "manutencoes"].flatMap(table => (state.rows[table] || []).map(row => ({ date: row.updated_at || row.atualizado_em || row.created_at || row.criado_em, userId: row.updated_by || row.atualizado_por || row.created_by || row.criado_por, table })))];
@@ -109,14 +122,17 @@
   }
   async function loadData({ silent = false } = {}) {
     if (!db || !state.user) return;
-    const names = ["equipamentos", "salas", "alunos", "emprestimos", "manutencoes", "perfis", "historico_atualizacoes"];
-    const [results, directoryResult, roleResult] = await Promise.all([
-      // Older tables created manually in Supabase may not have created_at yet.
-      // Avoid ordering on that optional field at query time; sort locally when present.
-      Promise.all(names.map(name => db.from(name).select("*").limit(300))),
+    const names = ["equipamentos", "salas", "alunos", "emprestimos", "manutencoes", "tarefas", "perfis", "historico_atualizacoes"];
+    // A single rejected fetch must not leave the whole app on a blank screen.
+    const settled = await Promise.allSettled([
+      ...names.map(name => db.from(name).select("*").limit(300)),
       db.rpc("tecnobase_user_directory"),
       db.rpc("tecnobase_role")
     ]);
+    const toResult = item => item.status === "fulfilled" ? item.value : { data:null, error:item.reason };
+    const results = settled.slice(0,names.length).map(toResult);
+    const directoryResult = toResult(settled[names.length]);
+    const roleResult = toResult(settled[names.length+1]);
     state.userDirectory = directoryResult.error ? [] : (directoryResult.data || []);
     for (let i = 0; i < names.length; i++) {
       const { data, error } = results[i];
@@ -128,11 +144,14 @@
     // The profile row reflects this user's saved role. The RPC remains the
     // fallback for installations where profile reads are restricted.
     state.role = profile?.perfil || (typeof roleResult.data === "string" ? roleResult.data : null) || "visualizacao";
-    const readErrors = results.map((result, index) => result.error ? `${names[index]}: ${result.error.message}` : null).filter(Boolean);
+    const readErrors = results.map((result,index) => result.error ? {name:names[index],error:result.error} : null).filter(Boolean);
     if (readErrors.length) {
-      console.warn("Falha ao carregar dados do TECNOBASE", readErrors);
-      const firstError = readErrors[0];
-      if (!silent) toast(`Não consegui carregar ${readErrors.map(item => item.split(":")[0]).join(", ")}. Supabase: ${firstError.slice(firstError.indexOf(":") + 1).trim()}`, "error");
+      console.warn("Falha ao carregar dados do TECNOBASE", readErrors.map(item=>`${item.name}: ${item.error?.message||"erro de conexão"}`));
+      if (!silent) {
+        const networkFailure = readErrors.find(item => /failed to fetch|fetch failed|network|load failed|cors/i.test(String(item.error?.message||item.error)));
+        if (networkFailure) toast(prettyError(networkFailure.error),"error");
+        else toast(`Não consegui carregar ${readErrors.map(item=>item.name).join(", ")}. ${prettyError(readErrors[0].error)}`,"error");
+      }
     }
     if (roleResult.error && !profile) {
       console.warn("Falha ao consultar o perfil de acesso", roleResult.error.message);
@@ -166,7 +185,7 @@
   function startRealtime() {
     if (!db || !state.user || state.realtimeChannel || state.realtimeRetryTimer) return;
     setRealtimeStatus("connecting");
-    const tables = ["equipamentos", "salas", "alunos", "emprestimos", "manutencoes", "historico_atualizacoes"];
+    const tables = ["equipamentos", "salas", "alunos", "emprestimos", "manutencoes", "tarefas", "historico_atualizacoes"];
     const channelId = ++state.realtimeChannelSequence;
     let channel = db.channel(`tecnobase-live-${state.user.id}-${channelId}`);
     for (const table of tables) channel = channel.on("postgres_changes", { event: "*", schema: "public", table }, () => {
@@ -251,6 +270,7 @@
     if (table === "alunos") return [["nome","Nome completo"],["turma","Turma"],["matricula","RA"]];
     if (table === "emprestimos") return [["equipamento_id","Equipamento"],["aluno_id","Aluno"],["professor_solicitante","Professor solicitante"],["responsavel","Responsável pelo empréstimo"],["turma","Turma"],["horario","Aula · 45 min"],["data_emprestimo","Retirada"],["data_prevista","Devolução prevista"],["status","Status"]];
     if (table === "manutencoes") return [["equipamento_id","Equipamento"],["tipo","Tipo"],["problema","Problema"],["prioridade","Prioridade"],["data","Data"],["status","Status"]];
+    if (table === "tarefas") return [["titulo","Tarefa"],["reminder_at","Lembrete"],["responsavel_id","Responsável"],["status","Estado"]];
     if (table === "perfis") return [["nome","Usuário"],["email","E-mail"],["perfil","Perfil"],["ativo","Acesso"]];
     return [["acao","Ação"],["entidade","Área"],["descricao","Descrição"],["user_id","Usuário"],["created_at","Data e hora"]];
   }
@@ -259,11 +279,12 @@
     if (key === "sala_id") v = mappedName("salas", v);
     if (key === "equipamento_id") v = table === "emprestimos" ? mappedEquipmentLabel(v) : mappedName("equipamentos", v);
     if (key === "aluno_id") v = mappedName("alunos", v);
+    if (key === "responsavel_id") v = mappedUser(v);
     if (key === "horario" && v) {
       const [hour, minute] = String(v).split(":").map(Number);
       if (Number.isFinite(hour) && Number.isFinite(minute)) { const end = (hour * 60 + minute + 45) % (24 * 60); v = `${String(hour).padStart(2,"0")}:${String(minute).padStart(2,"0")}–${String(Math.floor(end/60)).padStart(2,"0")}:${String(end%60).padStart(2,"0")} · 45 min`; }
     }
-    if (["data_emprestimo","data_prevista","data_devolucao","data","created_at"].includes(key)) v = fmt(v, key === "created_at");
+    if (["data_emprestimo","data_prevista","data_devolucao","data","created_at","reminder_at"].includes(key)) v = fmt(v, key === "created_at");
     if (key === "perfil") v = roleLabels[v] || v;
     if (key === "user_id") v = mappedUser(v);
     if (key === "ativo") v = v === true || v === "true" ? "Ativo" : "Inativo";
@@ -288,22 +309,96 @@
     const th = columns.map(([,label])=>`<th>${label.toUpperCase()}</th>`).join("");
     return `${pageHeading(page.title,titleSub,add)}<div class="toolbar"><label class="search-box"><span>⌕</span><input id="table-search" type="search" value="${escapeHtml(state.filters.q)}" placeholder="Buscar ${config.singular}..."></label>${queryFilter}<span class="muted" style="font-size:10px;margin-left:auto">${rows.length} registro${rows.length===1?"":"s"}</span></div><section class="panel data-panel"><div class="table-wrap"><table><thead><tr>${th}<th>AÇÕES</th></tr></thead><tbody>${dataRows}</tbody></table></div></section>${table === "perfis" ? `<section class="panel" style="margin-top:14px"><div class="panel-head"><div><h2 class="panel-title">Gerenciamento de usuários</h2><div class="panel-subtitle">Contas são criadas no Supabase Auth; depois, atribua o perfil nesta lista.</div></div></div><p class="muted" style="font-size:11px;line-height:1.7">Por segurança, um aplicativo no navegador não pode criar contas administrativas nem alterar senhas de outros usuários. Crie o usuário em Supabase → Authentication → Users e cadastre ou ajuste seu perfil na tabela <b>perfis</b>. O SQL do projeto inclui políticas para esse gerenciamento.</p></section>` : ""}`;
   }
+  function renderTasks() {
+    const all = state.rows.tarefas || [];
+    const tasks = all.filter(task => {
+      const matchState = !state.filters.status || task.status === state.filters.status;
+      const matchDate = !state.filters.date || localDateValue(task.reminder_at) === state.filters.date;
+      const q = state.filters.q.toLocaleLowerCase("pt-BR");
+      const matchQuery = !q || [task.titulo, task.observacoes, mappedUser(task.responsavel_id)].some(v => String(v||"").toLocaleLowerCase("pt-BR").includes(q));
+      return matchState && matchDate && matchQuery;
+    }).sort((a,b) => new Date(a.reminder_at)-new Date(b.reminder_at));
+    const cards = tasks.length ? tasks.map(task => {
+      const overdue = task.status !== "Concluída" && new Date(task.reminder_at) < new Date();
+      const actions = `<div class="task-actions">${task.status !== "Concluída" && canWrite() ? `<button class="button primary small" data-action="complete" data-id="${escapeHtml(task.id)}">Concluir</button>` : ""}${canWrite() ? `<button class="button secondary small" data-action="edit" data-table="tarefas" data-id="${escapeHtml(task.id)}">Editar</button>` : ""}${(isAdmin() || isTaskOwner(task)) ? `<button class="button danger small" data-action="delete" data-table="tarefas" data-id="${escapeHtml(task.id)}">Excluir</button>` : ""}</div>`;
+      return `<article class="task-card ${task.status === "Concluída" ? "task-done" : overdue ? "task-overdue" : ""}"><div class="task-card-main"><span class="task-state">${badge(overdue ? "Atrasada" : task.status)}</span><h2>${escapeHtml(task.titulo)}</h2>${task.observacoes ? `<p>${escapeHtml(task.observacoes)}</p>` : ""}<div class="task-meta"><span>◷ ${escapeHtml(fmt(task.reminder_at,true,true))}</span><span>♙ ${escapeHtml(mappedUser(task.responsavel_id))}</span></div></div>${actions}</article>`;
+    }).join("") : `<div class="empty-state"><b>Nenhuma tarefa encontrada.</b>Cadastre um lembrete para organizar os próximos serviços.</div>`;
+    const add = canWrite() ? `<button class="button primary" data-action="new" data-table="tarefas">＋ Nova tarefa</button>` : "";
+    return `${pageHeading("Tarefas e lembretes", "Organize serviços, prazos e responsáveis.", add)}<div class="task-intro panel"><div><strong>Lembretes pessoais e compartilhados</strong><p>Quem cria e quem recebe a tarefa podem acompanhá-la. Ative as notificações em Configurações para receber avisos fora do site.</p></div><button class="button secondary small" data-page="configuracoes">Configurar notificações</button></div><div class="toolbar task-toolbar"><label class="search-box"><span>⌕</span><input id="table-search" type="search" value="${escapeHtml(state.filters.q)}" placeholder="Buscar tarefa ou responsável"></label><input id="task-date-filter" class="filter-select" type="date" aria-label="Filtrar por data" value="${escapeHtml(state.filters.date)}"><select id="status-filter" class="filter-select"><option value="">Todos os estados</option><option value="Pendente" ${state.filters.status==="Pendente"?"selected":""}>Pendentes</option><option value="Concluída" ${state.filters.status==="Concluída"?"selected":""}>Concluídas</option></select><span class="muted task-count">${tasks.length} tarefa${tasks.length===1?"":"s"}</span></div><section class="task-list">${cards}</section>`;
+  }
+  async function completeTask(id) {
+    const task = (state.rows.tarefas || []).find(item => item.id === id);
+    if (!task || !canWrite()) return;
+    const {error} = await db.from("tarefas").update({status:"Concluída",concluido_em:new Date().toISOString(),updated_by:state.user.id}).eq("id",id);
+    if (error) return toast(prettyError(error),"error");
+    toast("Tarefa concluída.","success"); await loadData();
+  }
   function renderReports() { return `${pageHeading("Relatórios", "Exporte os dados do sistema para análise e prestação de contas.")}<div class="report-grid">${[["Inventário de equipamentos","Relatório organizado para impressão ou para salvar como PDF.","equipamentos","▣"],["Empréstimos","Empréstimos ativos, concluídos e respectivas datas.","emprestimos","⇄"],["Manutenções","Histórico de reparos e prioridades registradas.","manutencoes","⌁"],["Cadastro de alunos","Alunos e turmas cadastradas.","alunos","♙"],["Salas","Espaços e responsáveis.","salas","⌗"]].map(([t,d,table,ico])=>`<section class="panel report-card"><div class="report-symbol">${ico}</div><div><h3>${t}</h3><p>${d}</p><button class="button secondary small" data-action="export" data-table="${table}">${table==="equipamentos"?"↓ Gerar relatório PDF":"↓ Baixar CSV"}</button></div></section>`).join("")}</div>`; }
-  function renderSettings() { return `${pageHeading("Configurações", "Preferências e informações do ambiente TECNOBASE.")}<div class="settings-grid"><section class="panel settings-card"><h3>Conta conectada</h3><p>${escapeHtml(state.user?.email || "")}</p><p>Perfil atual: <b>${escapeHtml(roleLabels[state.role] || state.role)}</b></p><button class="button secondary small" id="settings-signout">Sair da conta</button></section><section class="panel settings-card"><h3>Conexão e segurança</h3><p>Autenticação persistente gerenciada pelo Supabase. Todas as tabelas são protegidas por Row Level Security (RLS).</p><p>O acesso aos dados depende do perfil registrado no banco.</p><span class="badge green">Conexão autenticada</span></section><section class="panel settings-card"><h3>Preferências de exibição</h3><p>Idioma: Português (Brasil)<br>Fuso horário: horário local do dispositivo<br>Interface responsiva para computador, tablet e celular.</p></section><section class="panel settings-card"><h3>Sobre o TECNOBASE</h3><p>Gestão de Tecnologia Escolar<br>Controle de equipamentos, salas, alunos, empréstimos e manutenções.</p><span class="badge blue">Versão 1.0</span></section></div>`; }
+  async function setupPwa() {
+    if (!("serviceWorker" in navigator) || !window.isSecureContext) return;
+    try { state.serviceWorkerRegistration = await navigator.serviceWorker.register("./sw.js", {scope:"./"}); }
+    catch (error) { console.warn("Não foi possível registrar o service worker", error?.message); }
+  }
+  function showInstallPrompt() {
+    [$("#login-install-button"),$("#install-app-button")].filter(Boolean).forEach(button => { button.hidden = !state.installPrompt; });
+  }
+  async function installApp() {
+    if (!state.installPrompt) {
+      const status = $("#install-status");
+      if (status) status.textContent = /iphone|ipad|ipod/i.test(navigator.userAgent) ? "No iPhone/iPad: abra o menu Compartilhar do Safari e toque em Adicionar à Tela de Início." : "No Chrome, abra o menu ⋮ e escolha Instalar TECNOBASE ou Criar atalho → Abrir como janela. Se não aparecer, use o endereço HTTPS e atualize o Chrome.";
+      return;
+    }
+    state.installPrompt.prompt();
+    await state.installPrompt.userChoice;
+    state.installPrompt = null; showInstallPrompt();
+  }
+  function decodeVapidKey(value) {
+    const padding = "=".repeat((4 - value.length % 4) % 4);
+    const base64 = (value + padding).replace(/-/g, "+").replace(/_/g, "/");
+    return Uint8Array.from(atob(base64), character => character.charCodeAt(0));
+  }
+  async function enablePushNotifications() {
+    const status = $("#push-status"), button = $("#enable-push-button");
+    if (!state.user) return toast("Entre na sua conta para ativar notificações.","error");
+    if (!("PushManager" in window) || !("Notification" in window)) return toast("Este navegador não oferece notificações push neste contexto. Use o Chrome com HTTPS.","error");
+    if (!state.serviceWorkerRegistration) await setupPwa();
+    if (!state.serviceWorkerRegistration) return toast("Não consegui preparar o serviço de notificações. Abra o site em HTTPS e tente novamente.","error");
+    const publicKey = window.tecnobasePushConfig?.publicKey;
+    if (!publicKey) return toast("O envio de avisos ainda não foi configurado no Supabase. Peça ao administrador para concluir a configuração do servidor.","error");
+    button.disabled = true;
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") { if(status)status.textContent="Permissão não concedida. Ative notificações nas configurações do navegador."; return; }
+      let subscription = await state.serviceWorkerRegistration.pushManager.getSubscription();
+      if (!subscription) subscription = await state.serviceWorkerRegistration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:decodeVapidKey(publicKey)});
+      const payload = subscription.toJSON();
+      const {error} = await db.from("push_subscriptions").upsert({user_id:state.user.id,endpoint:payload.endpoint,subscription:payload},{onConflict:"endpoint"});
+      if (error) throw error;
+      if(status)status.textContent="Este aparelho está inscrito para receber notificações dos lembretes atribuídos a você.";
+      toast("Notificações ativadas neste aparelho.","success");
+    } catch (error) { if(status)status.textContent=prettyError(error); toast(prettyError(error),"error"); }
+    finally { button.disabled = false; }
+  }
+  function renderSettings() { return `${pageHeading("Configurações", "Preferências e informações do ambiente TECNOBASE.")}<div class="settings-grid"><section class="panel settings-card pwa-settings-card"><h3>Instalar aplicativo</h3><p>Instale o TECNOBASE para abrir como aplicativo. No computador ou Android, use o botão quando o Chrome oferecer a instalação. No iPhone/iPad, use Compartilhar → Adicionar à Tela de Início.</p><button class="button primary small install-app-button" type="button">＋ Instalar TECNOBASE</button><p class="install-status" id="install-status">Se o botão não aparecer, o navegador pode já ter instalado o app ou ainda não atender aos requisitos de instalação.</p></section><section class="panel settings-card"><h3>Notificações de lembretes</h3><p>Permita notificações neste aparelho e associe-o à sua conta para receber tarefas atribuídas a você. O aviso fora do site depende da configuração do serviço de envio no Supabase.</p><button class="button primary small" id="enable-push-button" type="button">Ativar notificações neste aparelho</button><p class="push-status" id="push-status">${window.Notification?.permission === "granted" ? "Permissão concedida neste navegador." : "Ainda não ativadas neste aparelho."}</p></section><section class="panel settings-card"><h3>Conta conectada</h3><p>${escapeHtml(state.user?.email || "")}</p><p>Perfil atual: <b>${escapeHtml(roleLabels[state.role] || state.role)}</b></p><button class="button secondary small" id="settings-signout">Sair da conta</button></section><section class="panel settings-card"><h3>Conexão e segurança</h3><p>Autenticação persistente gerenciada pelo Supabase. Todas as tabelas são protegidas por Row Level Security (RLS).</p><p>O acesso aos dados depende do perfil registrado no banco.</p><span class="badge green">Conexão autenticada</span></section><section class="panel settings-card"><h3>Preferências de exibição</h3><p>Idioma: Português (Brasil)<br>Fuso horário: horário local do dispositivo<br>Interface responsiva para computador, tablet e celular.</p></section><section class="panel settings-card"><h3>Sobre o TECNOBASE</h3><p>Gestão de Tecnologia Escolar<br>Controle de equipamentos, salas, alunos, empréstimos e manutenções.</p><span class="badge blue">Versão 1.0</span></section></div>`; }
   function renderPage() {
     const page = pages[state.page]; if (!page) return;
     $("#breadcrumb-current").textContent = page.title;
     $$(".nav-item").forEach(el => el.classList.toggle("active",el.dataset.page===state.page));
-    let html = state.page === "dashboard" ? renderDashboard() : page.table ? renderTable(page.table) : state.page === "relatorios" ? renderReports() : renderSettings();
+    let html = state.page === "dashboard" ? renderDashboard() : state.page === "tarefas" ? renderTasks() : page.table ? renderTable(page.table) : state.page === "relatorios" ? renderReports() : renderSettings();
     $("#page-content").innerHTML = html;
     if (state.page === "usuarios" && !isAdmin()) { $("#page-content").insertAdjacentHTML("afterbegin",`<div class="panel" style="margin-bottom:14px;font-size:11px;color:#8a5b16;background:#fff9eb">Apenas o perfil administrador pode consultar e gerenciar usuários.</div>`); }
   }
-  function goPage(page) { state.page = page; state.filters = { q:"", status:"" }; renderPage(); $("#sidebar").classList.remove("open"); $("#sidebar-scrim").classList.remove("show"); }
+  function goPage(page) { state.page = page; state.filters = { q:"", status:"", turma:"", date:"" }; renderPage(); $("#sidebar").classList.remove("open"); $("#sidebar-scrim").classList.remove("show"); }
   function formField(def, current = {}, ownerTable = "") {
     let value = current[def.name] ?? "";
     if (def.type === "date" && value) value = String(value).slice(0,10);
     const required = def.required ? "required" : "";
-    const full = def.type === "textarea" || def.name === "observacao" ? "full-row" : "";
+    const full = def.type === "textarea" || def.name === "observacao" || def.name === "observacoes" ? "full-row" : "";
+    if (def.type === "datetime-local" && value) value = localDateTimeValue(value);
+    if (ownerTable === "tarefas" && def.type === "task-user") {
+      const people = state.userDirectory || [];
+      return `<div class="form-field"><label>${def.label}${def.required?" *":""}</label><select name="responsavel_id" ${required}><option value="">Selecione quem recebe o lembrete</option>${people.map(person=>`<option value="${escapeHtml(person.id)}" ${String(value)===String(person.id)?"selected":""}>${escapeHtml(person.nome||"Usuário")}</option>`).join("")}</select><small class="field-hint">A tarefa fica visível para quem criou e para a pessoa responsável.</small></div>`;
+    }
     if (ownerTable === "emprestimos" && def.name === "horario") return `<div class="form-field"><label>${def.label} *</label><input type="time" name="horario" value="${escapeHtml(value)}" required><small class="field-hint">Cada aula dura 45 minutos; o horário final é calculado automaticamente.</small></div>`;
     if (ownerTable === "equipamentos" && (def.type === "equipment-brand" || def.type === "equipment-model")) {
       const options = def.type === "equipment-brand" ? Object.keys(equipmentCatalog[current.tipo] || {}) : (equipmentCatalog[current.tipo]?.[current.marca] || []);
@@ -335,7 +430,7 @@
     $("#dialog-eyebrow").textContent = id ? "EDIÇÃO" : "NOVO CADASTRO";
     $("#dialog-title").textContent = `${id?"Editar":"Novo"} ${cfg.singular}`;
     const today = new Date(), dateString = date => new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,10), due = new Date(today); due.setDate(due.getDate()+7);
-    const defaults = table === "equipamentos" ? { status:"Disponível", tipo:"Tablet", marca:"Positivo", modelo:"T2040B" } : table === "emprestimos" ? { data_emprestimo:dateString(today), data_prevista:dateString(due), status:"Ativo", responsavel:state.profile?.nome||"" } : table === "manutencoes" ? { data:dateString(today), status:"Aberta", prioridade:"Média", responsavel:state.profile?.nome||"" } : {};
+    const defaults = table === "equipamentos" ? { status:"Disponível", tipo:"Tablet", marca:"Positivo", modelo:"T2040B" } : table === "emprestimos" ? { data_emprestimo:dateString(today), data_prevista:dateString(due), status:"Ativo", responsavel:state.profile?.nome||"" } : table === "manutencoes" ? { data:dateString(today), status:"Aberta", prioridade:"Média", responsavel:state.profile?.nome||"" } : table === "tarefas" ? { reminder_at:localDateTimeValue(), status:"Pendente", responsavel_id:state.user?.id||"" } : {};
     const values = existing || defaults;
     const form = $("#record-form"); form.dataset.table=table; form.dataset.id=id||"";
     $("#equipment-preview").hidden = table !== "equipamentos";
@@ -348,7 +443,7 @@
     const row = state.rows[table]?.find(x=>x.id===id); if (!row) return;
     const cfg = configs[table];
     const fields = cfg.fields.map(def=>[def.label,cellValue(table,row,def.name)]);
-    $("#detail-content").innerHTML=`<div class="detail-head"><div><span class="eyebrow">FICHA ${cfg.singular.toUpperCase()}</span><h2>${escapeHtml(row.nome||row.problema||row.acao||"Registro")}</h2></div><button class="icon-button" data-close-detail>×</button></div><div class="detail-grid">${fields.map(([k,v])=>`<div class="detail-cell"><small>${escapeHtml(k)}</small><b>${escapeHtml(v||"—")}</b></div>`).join("")}</div>${table === "equipamentos" ? `<div class="detail-history"><h3>Documentos e anexos</h3><p class="muted" style="font-size:10px">Área para QR Code, fotos e anexos.</p></div>` : ""}`;
+    $("#detail-content").innerHTML=`<div class="detail-head"><div><span class="eyebrow">FICHA ${cfg.singular.toUpperCase()}</span><h2>${escapeHtml(row.titulo||row.nome||row.problema||row.acao||"Registro")}</h2></div><button class="icon-button" data-close-detail>×</button></div><div class="detail-grid">${fields.map(([k,v])=>`<div class="detail-cell"><small>${escapeHtml(k)}</small><b>${escapeHtml(v||"—")}</b></div>`).join("")}</div>${table === "equipamentos" ? `<div class="detail-history"><h3>Documentos e anexos</h3><p class="muted" style="font-size:10px">Área para QR Code, fotos e anexos.</p></div>` : ""}`;
     $("#detail-dialog").showModal();
   }
   async function saveRecord(event) {
@@ -356,6 +451,7 @@
     if (!canWrite()) return toast("Acesso negado.","error");
     if (table==="perfis" && !isAdmin()) return toast("Somente administradores podem alterar perfis.","error");
     const data=Object.fromEntries(new FormData(form).entries());
+    const existing = id ? (state.rows[table] || []).find(row => row.id === id) : null;
     if (table === "equipamentos") {
       data.categoria = "Informática"; // campo técnico legado, preenchido automaticamente
       data.nome = [data.tipo, data.marca, data.modelo].filter(Boolean).join(" ");
@@ -368,18 +464,18 @@
     if (table==="perfis") data.ativo=data.ativo==="true";
     if (table==="emprestimos" && data.status==="Devolvido") data.data_devolucao=new Date().toISOString().slice(0,10);
     if (table==="emprestimos" && data.status!=="Devolvido") data.data_devolucao=null;
+    if (table==="tarefas") { data.reminder_at = new Date(data.reminder_at).toISOString(); data.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Sao_Paulo"; data.concluido_em = data.status === "Concluída" ? (existing?.concluido_em || new Date().toISOString()) : null; }
     if (table==="equipamentos" && !data.sala_id) data.sala_id=null;
     if (table==="emprestimos" && !data.sala_id) data.sala_id=null;
-    const existing = id ? (state.rows[table] || []).find(row => row.id === id) : null;
     Object.assign(data, updateStamp(table, existing, !id));
-    const result=id ? await db.from(table).update(data).eq("id",id).select().single() : await db.from(table).insert(data).select().single();
+    let result; try { result=id ? await db.from(table).update(data).eq("id",id).select().single() : await db.from(table).insert(data).select().single(); } catch(error) { return toast(prettyError(error),"error"); }
     if (result.error) return toast(prettyError(result.error),"error");
     const label=data.nome||data.problema||configs[table].singular;
     $("#record-dialog").close(); toast(`${titleCase(configs[table].singular)} ${id?"atualizado":"cadastrado"} com sucesso.`,"success"); await loadData();
   }
   function confirmDelete(table,record) {
     const dialog = $("#delete-confirm-dialog");
-    const label = record.nome || record.problema || record.patrimonio || configs[table].singular;
+    const label = record.titulo || record.nome || record.problema || record.patrimonio || configs[table].singular;
     $("#delete-confirm-title").textContent = "Tem certeza que deseja excluir?";
     $("#delete-confirm-message").textContent = `O registro “${label}” será removido. Essa ação não pode ser desfeita.`;
     return new Promise(resolve => {
@@ -388,8 +484,8 @@
     });
   }
   async function deleteRecord(table,id) {
-    if (!isAdmin()) return toast("Apenas administradores podem excluir registros.","error");
     const record=state.rows[table].find(x=>x.id===id); if (!record) return;
+    if (!(isAdmin() || (table === "tarefas" && isTaskOwner(record)))) return toast(table === "tarefas" ? "Somente quem criou a tarefa ou o administrador pode excluí-la." : "Apenas administradores podem excluir registros.","error");
     if (!await confirmDelete(table,record)) return;
     try {
       const {data,error}=await db.from(table).delete().eq("id",id).select("id");
@@ -539,8 +635,8 @@
     $("#year").textContent=new Date().getFullYear();
     $("#today-label").textContent=new Intl.DateTimeFormat("pt-BR",{weekday:"short",day:"2-digit",month:"short",year:"numeric"}).format(new Date());
     const rememberedEmail=localStorage.getItem("tecnobase.rememberedEmail"); if(rememberedEmail)$("#login-email").value=rememberedEmail;
-    if (!db) { $("#login-form").addEventListener("submit",e=>{e.preventDefault();toast("A biblioteca ou configuração do Supabase não foi carregada.","error")}); return; }
-    const {data:{session}}=await db.auth.getSession(); if(session?.user) await showApp(session.user);
+    if (!db) { toast(window.tecnobaseConfigError ? prettyError(window.tecnobaseConfigError) : "O cliente do Supabase não carregou. Confira a conexão e atualize a página.","error"); return; }
+    try { const {data:{session}}=await db.auth.getSession(); if(session?.user) await showApp(session.user); } catch (error) { console.warn("Falha ao consultar a sessão do Supabase",error?.message); toast(prettyError(error),"error"); }
     db.auth.onAuthStateChange((event,session)=>{
       if(event==="SIGNED_OUT"){
         stopRealtime();
@@ -560,9 +656,25 @@
   async function showApp(user) {
     if(state.user?.id===user.id && !$("#app-shell").classList.contains("hidden")) return;
     state.user=user; startRealtime(); $("#login-screen").classList.add("hidden");$("#app-shell").classList.remove("hidden");$("#page-content").innerHTML=`${pageHeading("Carregando…","Buscando os dados da escola.")}<div class="metric-grid">${Array(6).fill('<div class="skeleton"></div>').join("")}</div>`; await loadData();
+    if (new URLSearchParams(location.search).get("abrir") === "tarefas") { history.replaceState({}, "", location.pathname); goPage("tarefas"); }
   }
-  $("#login-form").addEventListener("submit",async e=>{e.preventDefault();const email=$("#login-email").value.trim();if($("#remember-me").checked)localStorage.setItem("tecnobase.rememberedEmail",email);else localStorage.removeItem("tecnobase.rememberedEmail");const b=$("button[type=submit]",e.currentTarget);b.disabled=true;const old=b.innerHTML;b.textContent="Entrando…";const {error}=await db.auth.signInWithPassword({email,password:$("#login-password").value});b.disabled=false;b.innerHTML=old;if(error)toast(loginError(error),"error")});
-  $("#forgot-password").addEventListener("click",async()=>{const email=$("#login-email").value.trim();if(!email)return toast("Informe seu e-mail antes de solicitar a recuperação.","error");const {error}=await db.auth.resetPasswordForEmail(email,{redirectTo:location.href.split("#")[0]});if(error)toast(prettyError(error),"error");else toast("Se este e-mail estiver cadastrado, você receberá um link para redefinir sua senha.","success")});
+  $("#login-form").addEventListener("submit",async e=>{
+    e.preventDefault();
+    if (!db) return toast("O cliente do Supabase não carregou. Atualize a página e tente novamente.","error");
+    const email=$("#login-email").value.trim();
+    if($("#remember-me").checked)localStorage.setItem("tecnobase.rememberedEmail",email);else localStorage.removeItem("tecnobase.rememberedEmail");
+    const b=$("button[type=submit]",e.currentTarget), old=b.innerHTML; b.disabled=true; b.textContent="Entrando…";
+    try { const {error}=await db.auth.signInWithPassword({email,password:$("#login-password").value}); if(error)toast(loginError(error),"error"); }
+    catch(error) { console.error("Falha de conexão durante o login",error?.message); toast(prettyError(error),"error"); }
+    finally { b.disabled=false; b.innerHTML=old; }
+  });
+  window.addEventListener("beforeinstallprompt",event=>{event.preventDefault();state.installPrompt=event;showInstallPrompt();});
+  window.addEventListener("appinstalled",()=>{state.installPrompt=null;showInstallPrompt();const status=$("#install-status");if(status)status.textContent="TECNOBASE instalado neste aparelho.";});
+  window.addEventListener("online",()=>toast("Conexão restabelecida.","success"));
+  window.addEventListener("offline",()=>toast("Sem internet. O login e os dados ao vivo precisam de conexão.","error"));
+  setupPwa();
+  navigator.serviceWorker?.addEventListener("message",event=>{if(event.data?.type==="OPEN_TASKS"&&state.user)goPage("tarefas")});
+  $("#forgot-password").addEventListener("click",async()=>{if(!db)return toast("O cliente do Supabase não carregou. Atualize a página e tente novamente.","error");const email=$("#login-email").value.trim();if(!email)return toast("Informe seu e-mail antes de solicitar a recuperação.","error");try{const {error}=await db.auth.resetPasswordForEmail(email,{redirectTo:location.href.split("#")[0]});if(error)toast(prettyError(error),"error");else toast("Se este e-mail estiver cadastrado, você receberá um link para redefinir sua senha.","success")}catch(error){toast(prettyError(error),"error")}});
   $("#logout-button").addEventListener("click",async()=>{const {error}=await db.auth.signOut();if(error)toast(prettyError(error),"error")});
   $("#refresh-button").addEventListener("click",async()=>{await loadData();toast("Dados atualizados.","success")});
   $("#open-support-chat").addEventListener("click",openSupportChat);
@@ -572,6 +684,8 @@
   $("#record-dialog").addEventListener("change",e=>{if($("#record-form").dataset.table!=="equipamentos")return;if(e.target.name==="tipo")refreshEquipmentOptions(true,true);if(e.target.name==="marca")refreshEquipmentOptions(true,false);if(["tipo","marca","modelo"].includes(e.target.name))refreshEquipmentPreview();});
   $("#record-dialog").addEventListener("change",e=>{if($("#record-form").dataset.table!=="equipamentos"||!e.target.name.endsWith("_choice"))return;const input=e.target.parentElement.querySelector(`input[name='${e.target.name.replace("_choice", "")}']`);if(!input)return;const enabled=e.target.value==="informar";input.disabled=!enabled;input.hidden=!enabled;input.required=enabled;if(!enabled)input.value="";});
   document.addEventListener("click",async e=>{
+    if(e.target.closest(".install-app-button")){await installApp();return;}
+    if(e.target.closest("#enable-push-button")){await enablePushNotifications();return;}
     if(e.target.closest("#settings-signout")){const {error}=await db.auth.signOut();if(error)toast(prettyError(error),"error");return;}
     if(e.target.closest("[data-close-support]")){ $("#support-dialog").close();return; }
     const contact=e.target.closest("[data-support-requester]"); if(contact){state.supportRequesterId=contact.dataset.supportRequester;renderSupportMessages();return;}
@@ -581,11 +695,11 @@
     if(e.target.closest("[data-close-detail]")){ $("#detail-dialog").close();return; }
     const action=e.target.closest("[data-action]"); if(!action)return;
     const {action:act,table,id}=action.dataset;
-    if(act==="new")openRecord(table); if(act==="edit")openRecord(table,id); if(act==="detail")openDetail(table,id); if(act==="delete")await deleteRecord(table,id); if(act==="export"){if(table==="equipamentos")exportEquipmentPdf();else exportCsv(table)}
+    if(act==="new")openRecord(table); if(act==="edit")openRecord(table,id); if(act==="detail")openDetail(table,id); if(act==="delete")await deleteRecord(table,id); if(act==="complete")await completeTask(id); if(act==="export"){if(table==="equipamentos")exportEquipmentPdf();else exportCsv(table)}
   });
   $("#page-content").addEventListener("input",e=>{if(e.target.id==="table-search"){state.filters.q=e.target.value;const pos=e.target.selectionStart;renderPage();const input=$("#table-search");input?.focus();input?.setSelectionRange(pos,pos)}});
   $("#page-content").addEventListener("change",e=>{if(e.target.id==="status-filter"){state.filters.status=e.target.value;renderPage()}});
-  $("#page-content").addEventListener("change",e=>{if(e.target.id==="turma-filter"){state.filters.turma=e.target.value;renderPage()}});
+  $("#page-content").addEventListener("change",e=>{if(e.target.id==="turma-filter"){state.filters.turma=e.target.value;renderPage()} if(e.target.id==="task-date-filter"){state.filters.date=e.target.value;renderPage()}});
   $$('[data-toggle-password]').forEach(btn=>btn.addEventListener("click",()=>{const input=$("#"+btn.dataset.togglePassword);input.type=input.type==="password"?"text":"password"}));
   $("#menu-toggle").addEventListener("click",()=>{$("#sidebar").classList.add("open");$("#sidebar-scrim").classList.add("show")});
   $("#close-sidebar").addEventListener("click",()=>{$("#sidebar").classList.remove("open");$("#sidebar-scrim").classList.remove("show")});
